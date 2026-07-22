@@ -1,0 +1,16 @@
+# FlugFinder Iran - Dependencies
+
+# API & HTTP
+requests==2.32.3
+
+# Datenvalidierung
+pydantic==2.7.4
+
+# Umgebungsvariablen
+python-dotenv==1.0.1
+
+# Numerische Berechnung (Preis-Vorhersage)
+numpy==2.0.2
+
+# Grafiken (Preis-Trend-Graph)
+matplotlib==3.9.2

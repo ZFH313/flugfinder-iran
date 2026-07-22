@@ -1,0 +1,80 @@
+[
+  {
+    "name": "Sommerferien 2025",
+    "start": "2025-07-03",
+    "end": "2025-08-13",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Herbstferien 2025",
+    "start": "2025-10-20",
+    "end": "2025-10-31",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Weihnachtsferien 2025/2026",
+    "start": "2025-12-22",
+    "end": "2026-01-05",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Winterferien 2026",
+    "start": "2026-02-02",
+    "end": "2026-02-03",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Osterferien 2026",
+    "start": "2026-03-23",
+    "end": "2026-04-07",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Pfingstferien 2026",
+    "start": "2026-05-26",
+    "end": "2026-05-26",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Sommerferien 2026",
+    "start": "2026-07-02",
+    "end": "2026-08-12",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Herbstferien 2026",
+    "start": "2026-10-19",
+    "end": "2026-10-30",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Weihnachtsferien 2026/2027",
+    "start": "2026-12-23",
+    "end": "2027-01-06",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Winterferien 2027",
+    "start": "2027-02-01",
+    "end": "2027-02-02",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Osterferien 2027",
+    "start": "2027-03-22",
+    "end": "2027-04-06",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Pfingstferien 2027",
+    "start": "2027-05-14",
+    "end": "2027-05-25",
+    "state": "Niedersachsen"
+  },
+  {
+    "name": "Sommerferien 2027",
+    "start": "2027-07-01",
+    "end": "2027-08-11",
+    "state": "Niedersachsen"
+  }
+]

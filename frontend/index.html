@@ -22,10 +22,15 @@
     </header>
 
     <main>
+        <!-- Status-Banner -->
+        <section id="status-banner" class="banner hidden">
+            <span id="status-text"></span>
+        </section>
+
         <!-- Manuelle Suche -->
         <section id="manual-search" class="card">
             <h2>🔍 Flug suchen</h2>
-            <p class="info-text">Wähle dein Reisedatum – Suche läuft über alle 4 Flughäfen.</p>
+            <p class="info-text">Wähle Hin- und Rückflug – Suche läuft über alle Flughäfen.</p>
             <div class="search-form">
                 <div class="form-row">
                     <div class="form-group">
@@ -42,11 +47,34 @@
                 </button>
                 <p id="search-status" class="search-status hidden"></p>
             </div>
-        </section>
 
-        <!-- Status-Banner -->
-        <section id="status-banner" class="banner hidden">
-            <span id="status-text"></span>
+            <!-- Token Einrichtung (einmalig) -->
+            <div id="token-setup" class="token-section hidden">
+                <h3>⚙️ Einmalige Einrichtung</h3>
+                <p class="info-text">Um die Suche vom Handy zu starten, brauchst du einen GitHub Token. Diesen gibst du nur <strong>einmal</strong> ein.</p>
+                <details class="token-help">
+                    <summary>📖 Wie bekomme ich den Token?</summary>
+                    <ol>
+                        <li>Öffne: <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
+                        <li>Klicke "Generate new token (classic)"</li>
+                        <li>Name: <code>FlugFinder</code></li>
+                        <li>Haken bei <strong>repo</strong> setzen</li>
+                        <li>Unten: "Generate token" klicken</li>
+                        <li>Token kopieren und hier einfügen:</li>
+                    </ol>
+                </details>
+                <div class="form-group" style="margin-top: 0.5rem;">
+                    <label for="github-token">GitHub Token</label>
+                    <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx..." />
+                </div>
+                <button class="btn-save" onclick="saveToken()">💾 Token speichern</button>
+            </div>
+
+            <!-- Token gespeichert Info -->
+            <div id="token-saved" class="token-saved hidden">
+                <span>✅ Verbunden</span>
+                <button class="btn-small" onclick="resetToken()">Token ändern</button>
+            </div>
         </section>
 
         <!-- Zusammenfassung -->
@@ -114,7 +142,7 @@
                         </tr>
                     </thead>
                     <tbody id="flights-body">
-                        <tr><td colspan="7" class="loading">Noch keine Ergebnisse. Starte eine Suche oben!</td></tr>
+                        <tr><td colspan="7" class="loading">Lade Daten...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -135,7 +163,7 @@
     </main>
 
     <footer>
-        <p>FlugFinder Iran – Daten via SerpApi (Google Flights)</p>
+        <p>FlugFinder Iran – Automatische Flugsuche | Daten via SerpApi (Google Flights)</p>
         <p class="footer-small">Preise können sich jederzeit ändern. Keine Buchungsgarantie.</p>
     </footer>
 

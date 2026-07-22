@@ -10,6 +10,7 @@ let flightData = null;
 document.addEventListener("DOMContentLoaded", () => {
     loadData();
     setupFilters();
+    setupTokenUI();
     registerServiceWorker();
 });
 
@@ -21,9 +22,8 @@ async function loadData() {
         flightData = await response.json();
         renderAll();
     } catch (error) {
-        console.error("Fehler beim Laden:", error);
         document.getElementById("flights-body").innerHTML =
-            '<tr><td colspan="7" class="loading">Noch keine Daten vorhanden. Die erste Suche läuft automatisch um 8:00 Uhr.</td></tr>';
+            '<tr><td colspan="7" class="loading">Noch keine Ergebnisse. Starte eine Suche oben!</td></tr>';
     }
 }
 
@@ -40,82 +40,55 @@ function renderAll() {
 
 // --- Zusammenfassung ---
 function renderSummary() {
-    const data = flightData;
-
-    // Letzte Suche
-    const lastUpdated = new Date(data.last_updated);
+    const lastUpdated = new Date(flightData.last_updated);
     document.getElementById("last-updated").textContent =
         lastUpdated.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    document.getElementById("holiday-period").textContent = flightData.holiday_period || "–";
 
-    // Ferien
-    document.getElementById("holiday-period").textContent = data.holiday_period || "–";
+    const cheapest = flightData.summary?.cheapest_price;
+    document.getElementById("cheapest-price").textContent = cheapest ? `${Math.round(cheapest)}€` : "–";
 
-    // Günstigster Preis
-    const cheapest = data.summary?.cheapest_price;
-    document.getElementById("cheapest-price").textContent =
-        cheapest ? `${Math.round(cheapest)}€` : "–";
-
-    // Bester Flughafen
-    const airport = data.summary?.cheapest_airport;
-    const airportNames = { HAJ: "Hannover", BER: "Berlin", HAM: "Hamburg", FRA: "Frankfurt" };
-    document.getElementById("cheapest-airport").textContent =
-        airport ? `${airportNames[airport] || airport} (${airport})` : "–";
+    const airport = flightData.summary?.cheapest_airport;
+    const names = { HAJ: "Hannover", BER: "Berlin", HAM: "Hamburg", FRA: "Frankfurt" };
+    document.getElementById("cheapest-airport").textContent = airport ? `${names[airport] || airport}` : "–";
 }
 
-// --- Status Banner ---
 function renderStatusBanner() {
     const banner = document.getElementById("status-banner");
     const text = document.getElementById("status-text");
-
     if (flightData.summary?.has_alert) {
         banner.classList.remove("hidden");
         banner.classList.add("alert");
-        text.textContent = "🚨 GÜNSTIG-ALARM! Es gibt besonders günstige Flüge!";
+        text.textContent = "🚨 GÜNSTIG-ALARM! Besonders günstige Flüge gefunden!";
     } else if (flightData.flights?.length > 0) {
         banner.classList.remove("hidden");
-        banner.classList.remove("alert");
-        text.textContent = `✅ ${flightData.flights.length} Flüge gefunden – Daten aktuell`;
+        text.textContent = `✅ ${flightData.flights.length} Flüge gefunden`;
     }
 }
 
 // --- Flug-Tabelle ---
 function renderFlights(flights) {
     const tbody = document.getElementById("flights-body");
-
     if (!flights || flights.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="loading">Keine Flüge gefunden</td></tr>';
         return;
     }
-
-    tbody.innerHTML = flights.map(flight => {
-        const isCheap = flight.is_very_cheap;
-        const isWeekend = flight.is_weekend_flight;
-        const isDirect = flight.stops_outbound === 0;
-
-        // Badges
+    tbody.innerHTML = flights.map(f => {
+        const isCheap = f.is_very_cheap;
         let badges = "";
         if (isCheap) badges += '<span class="badge badge-cheap">GÜNSTIG</span> ';
-        if (isWeekend) badges += '<span class="badge badge-weekend">Wochenende</span> ';
-        if (isDirect) badges += '<span class="badge badge-direct">Direkt</span> ';
-
-        // Gepäck
-        const luggage = flight.luggage === "with_luggage" ? "🧳" : "🎒";
-
-        // Dauer
-        const durationH = Math.floor(flight.duration_outbound_min / 60);
-        const durationM = flight.duration_outbound_min % 60;
-
-        return `
-            <tr class="${isCheap ? 'cheap' : ''}">
-                <td><strong>${flight.departure_airport}</strong> → ${flight.destination_airport}</td>
-                <td>${formatDate(flight.outbound_date)} – ${formatDate(flight.return_date)}</td>
-                <td class="price-cell">${Math.round(flight.price_total)}€</td>
-                <td>${flight.airline}</td>
-                <td>${flight.stops_outbound === 0 ? 'Direkt' : flight.stops_outbound + ' Stopp'}</td>
-                <td>${luggage}</td>
-                <td>${badges || '–'}</td>
-            </tr>
-        `;
+        if (f.is_weekend_flight) badges += '<span class="badge badge-weekend">WE</span> ';
+        if (f.stops_outbound === 0) badges += '<span class="badge badge-direct">Direkt</span> ';
+        const luggage = f.luggage === "with_luggage" ? "🧳" : "🎒";
+        return `<tr class="${isCheap ? 'cheap' : ''}">
+            <td><strong>${f.departure_airport}</strong>→${f.destination_airport}</td>
+            <td>${formatDate(f.outbound_date)}–${formatDate(f.return_date)}</td>
+            <td class="price-cell">${Math.round(f.price_total)}€</td>
+            <td>${f.airline}</td>
+            <td>${f.stops_outbound === 0 ? 'Direkt' : f.stops_outbound + 'x'}</td>
+            <td>${luggage}</td>
+            <td>${badges || '–'}</td>
+        </tr>`;
     }).join("");
 }
 
@@ -128,23 +101,13 @@ function setupFilters() {
 
 function applyFilters() {
     if (!flightData?.flights) return;
-
+    let filtered = [...flightData.flights];
     const airport = document.getElementById("filter-airport").value;
     const luggage = document.getElementById("filter-luggage").value;
-    const destination = document.getElementById("filter-destination").value;
-
-    let filtered = [...flightData.flights];
-
-    if (airport !== "all") {
-        filtered = filtered.filter(f => f.departure_airport === airport);
-    }
-    if (luggage !== "all") {
-        filtered = filtered.filter(f => f.luggage === luggage);
-    }
-    if (destination !== "all") {
-        filtered = filtered.filter(f => f.destination_airport === destination);
-    }
-
+    const dest = document.getElementById("filter-destination").value;
+    if (airport !== "all") filtered = filtered.filter(f => f.departure_airport === airport);
+    if (luggage !== "all") filtered = filtered.filter(f => f.luggage === luggage);
+    if (dest !== "all") filtered = filtered.filter(f => f.destination_airport === dest);
     renderFlights(filtered);
 }
 
@@ -152,211 +115,132 @@ function applyFilters() {
 function renderPredictions() {
     const section = document.getElementById("prediction-section");
     const content = document.getElementById("prediction-content");
-
-    if (!flightData.predictions || flightData.predictions.length === 0) {
-        section.classList.add("hidden");
-        return;
-    }
-
+    if (!flightData.predictions || flightData.predictions.length === 0) { section.classList.add("hidden"); return; }
     section.classList.remove("hidden");
-
-    content.innerHTML = flightData.predictions.map(pred => {
-        let cssClass = "uncertain";
-        let icon = "❓";
-
-        if (pred.advice === "book_now") {
-            cssClass = "book-now";
-            icon = "✅";
-        } else if (pred.advice === "wait") {
-            cssClass = "wait";
-            icon = "⏳";
-        }
-
-        return `
-            <div class="prediction-card ${cssClass}">
-                <div class="prediction-advice">${icon} ${pred.route}: ${adviceText(pred.advice)}</div>
-                <div class="prediction-reason">${pred.reason}</div>
-            </div>
-        `;
+    content.innerHTML = flightData.predictions.map(p => {
+        let css = "uncertain", icon = "❓";
+        if (p.advice === "book_now") { css = "book-now"; icon = "✅"; }
+        else if (p.advice === "wait") { css = "wait"; icon = "⏳"; }
+        return `<div class="prediction-card ${css}"><div class="prediction-advice">${icon} ${p.route}: ${p.advice === "book_now" ? "Jetzt buchen!" : p.advice === "wait" ? "Noch warten" : "Unsicher"}</div><div class="prediction-reason">${p.reason}</div></div>`;
     }).join("");
-}
-
-function adviceText(advice) {
-    const texts = {
-        book_now: "Jetzt buchen!",
-        wait: "Noch warten",
-        uncertain: "Unsicher",
-    };
-    return texts[advice] || advice;
 }
 
 // --- Kombi-Tickets ---
 function renderCombos() {
     const section = document.getElementById("combo-section");
     const content = document.getElementById("combo-content");
-
-    if (!flightData.combo_tickets || flightData.combo_tickets.length === 0) {
-        section.classList.add("hidden");
-        return;
-    }
-
+    if (!flightData.combo_tickets || flightData.combo_tickets.length === 0) { section.classList.add("hidden"); return; }
     section.classList.remove("hidden");
-
-    content.innerHTML = flightData.combo_tickets.map(combo => `
-        <div class="combo-card">
-            <div class="combo-route">
-                Hin: ${combo.departure_airport} → ${combo.destination_airport} |
-                Rück: ${combo.destination_airport} → ${combo.return_airport}
-            </div>
-            <div>
-                💰 ${Math.round(combo.price_total)}€ –
-                <span class="combo-savings">${Math.round(combo.savings)}€ gespart!</span>
-            </div>
-            <div class="info-text">
-                ${formatDate(combo.outbound_date)} – ${formatDate(combo.return_date)}
-            </div>
-        </div>
-    `).join("");
+    content.innerHTML = flightData.combo_tickets.map(c => `<div class="combo-card"><div class="combo-route">Hin: ${c.departure_airport}→${c.destination_airport} | Rück: →${c.return_airport}</div><div>💰 ${Math.round(c.price_total)}€ – <span class="combo-savings">${Math.round(c.savings)}€ gespart!</span></div></div>`).join("");
 }
 
 // --- Preis-Analyse ---
 function renderAnalysis() {
     const section = document.getElementById("analysis-section");
     const content = document.getElementById("analysis-content");
-
-    if (!flightData.price_analyses || flightData.price_analyses.length === 0) {
-        section.classList.add("hidden");
-        return;
-    }
-
+    if (!flightData.price_analyses || flightData.price_analyses.length === 0) { section.classList.add("hidden"); return; }
     section.classList.remove("hidden");
-
-    content.innerHTML = flightData.price_analyses.map(analysis => {
-        const trendIcon = {
-            rising: "📈",
-            falling: "📉",
-            stable: "➡️",
-            unknown: "❓",
-        }[analysis.trend] || "❓";
-
-        const diffText = analysis.percent_vs_average < 0
-            ? `${Math.abs(analysis.percent_vs_average)}% günstiger`
-            : `${analysis.percent_vs_average}% teurer`;
-
-        return `
-            <div class="analysis-item">
-                <span class="analysis-route">${analysis.route}</span>
-                <span class="analysis-trend">
-                    ${trendIcon} ${Math.round(analysis.current_price)}€
-                    (Ø ${Math.round(analysis.average_price)}€, ${diffText})
-                </span>
-            </div>
-        `;
+    const icons = { rising: "📈", falling: "📉", stable: "➡️", unknown: "❓" };
+    content.innerHTML = flightData.price_analyses.map(a => {
+        const diff = a.percent_vs_average < 0 ? `${Math.abs(a.percent_vs_average)}% günstiger` : `${a.percent_vs_average}% teurer`;
+        return `<div class="analysis-item"><span class="analysis-route">${a.route}</span><span class="analysis-trend">${icons[a.trend] || "❓"} ${Math.round(a.current_price)}€ (Ø ${Math.round(a.average_price)}€, ${diff})</span></div>`;
     }).join("");
 }
 
 // --- Hilfsfunktionen ---
-function formatDate(dateStr) {
-    if (!dateStr) return "–";
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
-}
+function formatDate(d) { if (!d) return "–"; return new Date(d).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }); }
 
-// --- Service Worker registrieren ---
+// --- Service Worker ---
 function registerServiceWorker() {
     if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("sw.js")
-            .then(() => console.log("Service Worker registriert"))
-            .catch(err => console.log("SW Registrierung fehlgeschlagen:", err));
+        navigator.serviceWorker.register("sw.js").catch(() => {});
     }
 }
 
-// --- Install Prompt (PWA) ---
-let deferredPrompt;
 
-window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    showInstallPrompt();
-});
+// ============================================================
+// MANUELLE SUCHE – Token-Verwaltung und GitHub Actions Trigger
+// ============================================================
 
-function showInstallPrompt() {
-    // Nur anzeigen wenn noch nicht installiert
-    if (window.matchMedia("(display-mode: standalone)").matches) return;
-
-    const prompt = document.createElement("div");
-    prompt.className = "install-prompt";
-    prompt.innerHTML = `
-        <span>📱 App installieren für schnellen Zugriff</span>
-        <div>
-            <button onclick="installApp()">Installieren</button>
-            <button class="dismiss" onclick="this.parentElement.parentElement.remove()">Später</button>
-        </div>
-    `;
-    document.body.appendChild(prompt);
+function setupTokenUI() {
+    // Prüfe ob Token schon gespeichert ist
+    const token = localStorage.getItem("github_pat");
+    if (token) {
+        document.getElementById("token-saved").classList.remove("hidden");
+        document.getElementById("token-setup").classList.add("hidden");
+    } else {
+        document.getElementById("token-setup").classList.remove("hidden");
+        document.getElementById("token-saved").classList.add("hidden");
+    }
 }
 
-async function installApp() {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const result = await deferredPrompt.userChoice;
-    console.log("Install:", result.outcome);
-    deferredPrompt = null;
-    document.querySelector(".install-prompt")?.remove();
+function saveToken() {
+    const input = document.getElementById("github-token");
+    const token = input.value.trim();
+
+    if (!token) {
+        alert("Bitte Token eingeben!");
+        return;
+    }
+
+    if (!token.startsWith("ghp_") && !token.startsWith("github_pat_")) {
+        alert("Das sieht nicht wie ein GitHub Token aus. Er beginnt normalerweise mit 'ghp_' oder 'github_pat_'");
+        return;
+    }
+
+    localStorage.setItem("github_pat", token);
+    input.value = "";
+
+    // UI aktualisieren
+    document.getElementById("token-setup").classList.add("hidden");
+    document.getElementById("token-saved").classList.remove("hidden");
+
+    showSearchStatus("✅ Token gespeichert! Du kannst jetzt Suchen starten.", "success");
 }
 
+function resetToken() {
+    localStorage.removeItem("github_pat");
+    document.getElementById("token-setup").classList.remove("hidden");
+    document.getElementById("token-saved").classList.add("hidden");
+}
 
-// --- Manuelle Suche ---
-
-/**
- * Löst eine manuelle Suche auf GitHub Actions aus.
- * Nutzt die GitHub API um den workflow_dispatch Event zu triggern.
- */
 async function triggerManualSearch() {
     const outbound = document.getElementById("search-outbound").value;
     const returnDate = document.getElementById("search-return").value;
-    const statusEl = document.getElementById("search-status");
     const btn = document.getElementById("btn-search");
 
     // Validierung
     if (!outbound || !returnDate) {
-        showSearchStatus("Bitte beide Daten auswählen!", "error");
+        showSearchStatus("❌ Bitte beide Daten auswählen!", "error");
         return;
     }
-
     if (returnDate <= outbound) {
-        showSearchStatus("Rückflug muss nach dem Hinflug sein!", "error");
+        showSearchStatus("❌ Rückflug muss nach dem Hinflug sein!", "error");
         return;
     }
-
-    // Mindestens 3 Tage Reise
     const diffDays = (new Date(returnDate) - new Date(outbound)) / (1000 * 60 * 60 * 24);
     if (diffDays < 3) {
-        showSearchStatus("Mindestens 3 Tage Reisedauer!", "error");
+        showSearchStatus("❌ Mindestens 3 Tage Reisedauer!", "error");
         return;
     }
 
-    const dates = `${outbound}:${returnDate}`;
+    // Token prüfen
+    const pat = localStorage.getItem("github_pat");
+    if (!pat) {
+        showSearchStatus("⚠️ Bitte erst unten den GitHub Token eingeben.", "error");
+        document.getElementById("token-setup").classList.remove("hidden");
+        return;
+    }
 
-    // Button deaktivieren
+    // Suche starten
+    const dates = `${outbound}:${returnDate}`;
     btn.disabled = true;
-    btn.textContent = "⏳ Suche wird gestartet...";
+    btn.textContent = "⏳ Wird gestartet...";
     showSearchStatus("Suche wird auf dem Server gestartet...", "pending");
 
     try {
-        // GitHub Actions workflow_dispatch auslösen
-        // Dafür braucht man ein GitHub Personal Access Token (PAT)
-        const pat = localStorage.getItem("github_pat");
-
-        if (!pat) {
-            showGitHubTokenPrompt(dates);
-            btn.disabled = false;
-            btn.textContent = "✈️ Suche starten";
-            return;
-        }
-
-        const owner = getRepoOwner();
-        const repo = getRepoName();
+        const owner = window.location.hostname.split(".")[0];
+        const repo = window.location.pathname.split("/").filter(Boolean)[0] || "flugfinder-iran";
 
         const response = await fetch(
             `https://api.github.com/repos/${owner}/${repo}/actions/workflows/daily_search.yml/dispatches`,
@@ -367,29 +251,26 @@ async function triggerManualSearch() {
                     "Accept": "application/vnd.github.v3+json",
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({
-                    ref: "main",
-                    inputs: { dates: dates },
-                }),
+                body: JSON.stringify({ ref: "main", inputs: { dates: dates } }),
             }
         );
 
         if (response.status === 204) {
             showSearchStatus(
-                `✅ Suche gestartet! Ergebnisse in ca. 3-5 Minuten. (${outbound} → ${returnDate})`,
+                `✅ Suche gestartet! ${outbound} → ${returnDate}. Ergebnisse kommen in 3-5 Minuten per Telegram + hier in der App.`,
                 "success"
             );
-            // Seite nach 5 Minuten automatisch neu laden
-            setTimeout(() => location.reload(), 300000);
         } else if (response.status === 401 || response.status === 403) {
             localStorage.removeItem("github_pat");
-            showSearchStatus("❌ GitHub Token ungültig. Bitte neu eingeben.", "error");
+            setupTokenUI();
+            showSearchStatus("❌ Token ungültig oder abgelaufen. Bitte neuen Token eingeben.", "error");
+        } else if (response.status === 404) {
+            showSearchStatus("❌ Workflow nicht gefunden. Ist die Datei .github/workflows/daily_search.yml vorhanden?", "error");
         } else {
-            const errorData = await response.json().catch(() => ({}));
-            showSearchStatus(`❌ Fehler: ${errorData.message || response.statusText}`, "error");
+            showSearchStatus("❌ Unbekannter Fehler. Versuche es auf GitHub → Actions manuell.", "error");
         }
     } catch (error) {
-        showSearchStatus(`❌ Verbindungsfehler: ${error.message}`, "error");
+        showSearchStatus("❌ Keine Verbindung: " + error.message, "error");
     }
 
     btn.disabled = false;
@@ -397,42 +278,8 @@ async function triggerManualSearch() {
 }
 
 function showSearchStatus(message, type) {
-    const statusEl = document.getElementById("search-status");
-    statusEl.textContent = message;
-    statusEl.className = `search-status ${type}`;
-    statusEl.classList.remove("hidden");
-}
-
-function showGitHubTokenPrompt(dates) {
-    const token = prompt(
-        "Für die manuelle Suche brauche ich deinen GitHub Personal Access Token.\n\n" +
-        "So erstellst du einen:\n" +
-        "1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)\n" +
-        "2. 'Generate new token (classic)'\n" +
-        "3. Haken bei 'repo' setzen\n" +
-        "4. Token kopieren und hier einfügen:\n\n" +
-        "(Der Token wird nur lokal auf deinem Gerät gespeichert)"
-    );
-
-    if (token && token.trim()) {
-        localStorage.setItem("github_pat", token.trim());
-        // Nochmal versuchen
-        triggerManualSearch();
-    } else {
-        showSearchStatus("Ohne GitHub Token kann die Suche nicht vom Handy gestartet werden. " +
-            "Alternative: Starte die Suche manuell auf github.com → Actions.", "error");
-    }
-}
-
-function getRepoOwner() {
-    // Versuche aus der aktuellen URL zu lesen
-    const url = window.location.hostname;
-    // Format: username.github.io
-    return url.split(".")[0];
-}
-
-function getRepoName() {
-    // Versuche aus dem Pfad zu lesen
-    const path = window.location.pathname.split("/").filter(Boolean);
-    return path[0] || "flugfinder-iran";
+    const el = document.getElementById("search-status");
+    el.textContent = message;
+    el.className = `search-status ${type}`;
+    el.classList.remove("hidden");
 }

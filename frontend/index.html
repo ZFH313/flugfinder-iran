@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="FlugFinder Iran – Günstige Flüge nach Iran finden">
+    <meta name="theme-color" content="#1a73e8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FlugFinder">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <title>FlugFinder Iran</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>✈️ FlugFinder Iran</h1>
+            <p class="subtitle">Günstige Flüge nach Iran – täglich aktualisiert</p>
+        </div>
+    </header>
+
+    <main>
+        <!-- Status-Banner -->
+        <section id="status-banner" class="banner hidden">
+            <span id="status-text"></span>
+        </section>
+
+        <!-- Zusammenfassung -->
+        <section id="summary" class="card">
+            <h2>📊 Zusammenfassung</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span class="summary-label">Letzte Suche</span>
+                    <span id="last-updated" class="summary-value">–</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Ferien</span>
+                    <span id="holiday-period" class="summary-value">–</span>
+                </div>
+                <div class="summary-item highlight">
+                    <span class="summary-label">Günstigster Preis</span>
+                    <span id="cheapest-price" class="summary-value price">–</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Bester Flughafen</span>
+                    <span id="cheapest-airport" class="summary-value">–</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Vorhersage -->
+        <section id="prediction-section" class="card hidden">
+            <h2>🔮 Preis-Vorhersage</h2>
+            <div id="prediction-content"></div>
+        </section>
+
+        <!-- Flug-Tabelle -->
+        <section id="flights-section" class="card">
+            <h2>🛫 Top Flüge</h2>
+            <div class="filter-bar">
+                <select id="filter-airport" aria-label="Flughafen filtern">
+                    <option value="all">Alle Flughäfen</option>
+                    <option value="HAJ">Hannover (HAJ)</option>
+                    <option value="BER">Berlin (BER)</option>
+                    <option value="HAM">Hamburg (HAM)</option>
+                    <option value="FRA">Frankfurt (FRA)</option>
+                </select>
+                <select id="filter-luggage" aria-label="Gepäck filtern">
+                    <option value="all">Mit & ohne Gepäck</option>
+                    <option value="with_luggage">Nur mit Gepäck</option>
+                    <option value="without_luggage">Nur ohne Gepäck</option>
+                </select>
+                <select id="filter-destination" aria-label="Ziel filtern">
+                    <option value="all">Alle Ziele</option>
+                    <option value="IKA">Teheran (IKA)</option>
+                    <option value="MHD">Mashhad (MHD)</option>
+                </select>
+            </div>
+            <div class="table-wrapper">
+                <table id="flights-table">
+                    <thead>
+                        <tr>
+                            <th>Route</th>
+                            <th>Datum</th>
+                            <th>Preis</th>
+                            <th>Airline</th>
+                            <th>Stopps</th>
+                            <th>Gepäck</th>
+                            <th>Info</th>
+                        </tr>
+                    </thead>
+                    <tbody id="flights-body">
+                        <tr><td colspan="7" class="loading">Lade Daten...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Kombi-Tickets -->
+        <section id="combo-section" class="card hidden">
+            <h2>🔀 Kombi-Ticket Tipps</h2>
+            <p class="info-text">Günstiger wenn Hin- und Rückflug von verschiedenen Flughäfen</p>
+            <div id="combo-content"></div>
+        </section>
+
+        <!-- Preis-Analyse -->
+        <section id="analysis-section" class="card hidden">
+            <h2>📈 Preis-Analyse pro Route</h2>
+            <div id="analysis-content"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>FlugFinder Iran – Automatische Flugsuche | Daten via Amadeus API</p>
+        <p class="footer-small">Preise können sich jederzeit ändern. Keine Buchungsgarantie.</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

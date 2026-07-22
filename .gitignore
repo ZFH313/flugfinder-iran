@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Umgebungsvariablen (NIEMALS committen!)
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Ergebnisse (werden von GitHub Actions automatisch committed)
+results/price_trend.png
+
+# Temporäre Dateien
+*.tmp
+*.log

@@ -498,3 +498,101 @@ footer {
         flex-direction: column;
     }
 }
+
+
+/* Token Section */
+.token-section {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.token-section h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+}
+
+.token-help {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.token-help summary {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+
+.token-help ol {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+    font-size: 0.82rem;
+    line-height: 1.8;
+}
+
+.token-help code {
+    background: #e8eaed;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.token-help a {
+    color: var(--primary);
+}
+
+input[type="password"] {
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    width: 100%;
+    background: white;
+}
+
+input[type="password"]:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+}
+
+.btn-save {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--success);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+}
+
+.btn-save:hover {
+    background: #0a7c46;
+}
+
+.token-saved {
+    margin-top: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: #e8f5e9;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: #1b5e20;
+}
+
+.btn-small {
+    padding: 0.3rem 0.6rem;
+    background: transparent;
+    border: 1px solid #9e9e9e;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+}

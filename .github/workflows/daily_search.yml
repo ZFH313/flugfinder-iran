@@ -1,0 +1,42 @@
+name: Daily Flight Search
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dates:
+        description: 'Reisedaten (Format: YYYY-MM-DD:YYYY-MM-DD)'
+        required: false
+        type: string
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt
+
+      - name: Flugsuche starten
+        run: python main.py --verbose
+        env:
+          SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Ergebnisse pushen
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add frontend/data.json results/ data/price_history.json
+          git diff --staged --quiet || git commit -m "Flugsuch-Ergebnisse"
+          git push

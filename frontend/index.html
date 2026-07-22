@@ -22,6 +22,28 @@
     </header>
 
     <main>
+        <!-- Manuelle Suche -->
+        <section id="manual-search" class="card">
+            <h2>🔍 Flug suchen</h2>
+            <p class="info-text">Wähle dein Reisedatum – Suche läuft über alle 4 Flughäfen.</p>
+            <div class="search-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="search-outbound">Hinflug</label>
+                        <input type="date" id="search-outbound" />
+                    </div>
+                    <div class="form-group">
+                        <label for="search-return">Rückflug</label>
+                        <input type="date" id="search-return" />
+                    </div>
+                </div>
+                <button id="btn-search" class="btn-primary" onclick="triggerManualSearch()">
+                    ✈️ Suche starten
+                </button>
+                <p id="search-status" class="search-status hidden"></p>
+            </div>
+        </section>
+
         <!-- Status-Banner -->
         <section id="status-banner" class="banner hidden">
             <span id="status-text"></span>
@@ -92,7 +114,7 @@
                         </tr>
                     </thead>
                     <tbody id="flights-body">
-                        <tr><td colspan="7" class="loading">Lade Daten...</td></tr>
+                        <tr><td colspan="7" class="loading">Noch keine Ergebnisse. Starte eine Suche oben!</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -113,7 +135,7 @@
     </main>
 
     <footer>
-        <p>FlugFinder Iran – Automatische Flugsuche | Daten via Amadeus API</p>
+        <p>FlugFinder Iran – Daten via SerpApi (Google Flights)</p>
         <p class="footer-small">Preise können sich jederzeit ändern. Keine Buchungsgarantie.</p>
     </footer>
 

@@ -304,3 +304,135 @@ async function installApp() {
     deferredPrompt = null;
     document.querySelector(".install-prompt")?.remove();
 }
+
+
+// --- Manuelle Suche ---
+
+/**
+ * Löst eine manuelle Suche auf GitHub Actions aus.
+ * Nutzt die GitHub API um den workflow_dispatch Event zu triggern.
+ */
+async function triggerManualSearch() {
+    const outbound = document.getElementById("search-outbound").value;
+    const returnDate = document.getElementById("search-return").value;
+    const statusEl = document.getElementById("search-status");
+    const btn = document.getElementById("btn-search");
+
+    // Validierung
+    if (!outbound || !returnDate) {
+        showSearchStatus("Bitte beide Daten auswählen!", "error");
+        return;
+    }
+
+    if (returnDate <= outbound) {
+        showSearchStatus("Rückflug muss nach dem Hinflug sein!", "error");
+        return;
+    }
+
+    // Mindestens 3 Tage Reise
+    const diffDays = (new Date(returnDate) - new Date(outbound)) / (1000 * 60 * 60 * 24);
+    if (diffDays < 3) {
+        showSearchStatus("Mindestens 3 Tage Reisedauer!", "error");
+        return;
+    }
+
+    const dates = `${outbound}:${returnDate}`;
+
+    // Button deaktivieren
+    btn.disabled = true;
+    btn.textContent = "⏳ Suche wird gestartet...";
+    showSearchStatus("Suche wird auf dem Server gestartet...", "pending");
+
+    try {
+        // GitHub Actions workflow_dispatch auslösen
+        // Dafür braucht man ein GitHub Personal Access Token (PAT)
+        const pat = localStorage.getItem("github_pat");
+
+        if (!pat) {
+            showGitHubTokenPrompt(dates);
+            btn.disabled = false;
+            btn.textContent = "✈️ Suche starten";
+            return;
+        }
+
+        const owner = getRepoOwner();
+        const repo = getRepoName();
+
+        const response = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/actions/workflows/daily_search.yml/dispatches`,
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": `token ${pat}`,
+                    "Accept": "application/vnd.github.v3+json",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    ref: "main",
+                    inputs: { dates: dates },
+                }),
+            }
+        );
+
+        if (response.status === 204) {
+            showSearchStatus(
+                `✅ Suche gestartet! Ergebnisse in ca. 3-5 Minuten. (${outbound} → ${returnDate})`,
+                "success"
+            );
+            // Seite nach 5 Minuten automatisch neu laden
+            setTimeout(() => location.reload(), 300000);
+        } else if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem("github_pat");
+            showSearchStatus("❌ GitHub Token ungültig. Bitte neu eingeben.", "error");
+        } else {
+            const errorData = await response.json().catch(() => ({}));
+            showSearchStatus(`❌ Fehler: ${errorData.message || response.statusText}`, "error");
+        }
+    } catch (error) {
+        showSearchStatus(`❌ Verbindungsfehler: ${error.message}`, "error");
+    }
+
+    btn.disabled = false;
+    btn.textContent = "✈️ Suche starten";
+}
+
+function showSearchStatus(message, type) {
+    const statusEl = document.getElementById("search-status");
+    statusEl.textContent = message;
+    statusEl.className = `search-status ${type}`;
+    statusEl.classList.remove("hidden");
+}
+
+function showGitHubTokenPrompt(dates) {
+    const token = prompt(
+        "Für die manuelle Suche brauche ich deinen GitHub Personal Access Token.\n\n" +
+        "So erstellst du einen:\n" +
+        "1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)\n" +
+        "2. 'Generate new token (classic)'\n" +
+        "3. Haken bei 'repo' setzen\n" +
+        "4. Token kopieren und hier einfügen:\n\n" +
+        "(Der Token wird nur lokal auf deinem Gerät gespeichert)"
+    );
+
+    if (token && token.trim()) {
+        localStorage.setItem("github_pat", token.trim());
+        // Nochmal versuchen
+        triggerManualSearch();
+    } else {
+        showSearchStatus("Ohne GitHub Token kann die Suche nicht vom Handy gestartet werden. " +
+            "Alternative: Starte die Suche manuell auf github.com → Actions.", "error");
+    }
+}
+
+function getRepoOwner() {
+    // Versuche aus der aktuellen URL zu lesen
+    const url = window.location.hostname;
+    // Format: username.github.io
+    return url.split(".")[0];
+}
+
+function getRepoName() {
+    // Versuche aus dem Pfad zu lesen
+    const path = window.location.pathname.split("/").filter(Boolean);
+    return path[0] || "flugfinder-iran";
+}

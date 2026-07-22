@@ -1,0 +1,44 @@
+[
+  {
+    "search_date": "2026-07-22",
+    "route": "BER-MHD",
+    "price_with_luggage": 1610.0,
+    "price_without_luggage": 1610.0,
+    "cheapest_airline": "Pegasus"
+  },
+  {
+    "search_date": "2026-07-22",
+    "route": "HAM-IKA",
+    "price_with_luggage": 1749.0,
+    "price_without_luggage": 1749.0,
+    "cheapest_airline": "Pegasus"
+  },
+  {
+    "search_date": "2026-07-22",
+    "route": "BER-IKA",
+    "price_with_luggage": 1832.0,
+    "price_without_luggage": 1832.0,
+    "cheapest_airline": "Pegasus"
+  },
+  {
+    "search_date": "2026-07-22",
+    "route": "HAJ-IKA",
+    "price_with_luggage": 1866.0,
+    "price_without_luggage": 1856.0,
+    "cheapest_airline": "Pegasus"
+  },
+  {
+    "search_date": "2026-07-22",
+    "route": "HAM-MHD",
+    "price_with_luggage": null,
+    "price_without_luggage": 1886.0,
+    "cheapest_airline": "Pegasus"
+  },
+  {
+    "search_date": "2026-07-22",
+    "route": "HAJ-MHD",
+    "price_with_luggage": 1956.0,
+    "price_without_luggage": 1956.0,
+    "cheapest_airline": "Pegasus"
+  }
+]

@@ -66,24 +66,37 @@ def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None =
         result.holiday_period = "Manuelle Suche"
         logger.info(f"Manuelle Suche mit {len(travel_dates)} Datums-Kombinationen")
     else:
-        # Schulferien laden
+        # Schulferien laden – ALLE 4 nächsten Ferienzeiten suchen
         holidays = load_holidays(config.paths.holidays_file)
-        next_holiday = get_next_holiday(holidays)
+        from .school_holidays import get_all_upcoming_holidays
+        upcoming = get_all_upcoming_holidays(holidays, min_duration_days=3)
 
-        if not next_holiday:
+        # Maximal die nächsten 4 Ferienperioden
+        upcoming = upcoming[:4]
+
+        if not upcoming:
             logger.error("Keine anstehenden Ferien gefunden!")
             result.errors.append("Keine anstehenden Ferien gefunden")
             return result
 
-        result.holiday_period = next_holiday.name
-        result.holiday_start = next_holiday.start
-        result.holiday_end = next_holiday.end
+        # Ferien-Info für Ergebnis
+        holiday_names = [h.name for h in upcoming]
+        result.holiday_period = " | ".join(holiday_names)
+        result.holiday_start = upcoming[0].start
+        result.holiday_end = upcoming[-1].end
 
-        # Reisedaten mit Flexibilität berechnen
-        travel_dates = calculate_travel_dates(
-            next_holiday,
-            flexibility_days=config.flight.flexibility_days,
-        )
+        logger.info(f"Suche für {len(upcoming)} Ferienzeiten: {holiday_names}")
+
+        # Reisedaten für ALLE Ferienperioden berechnen
+        travel_dates = []
+        for holiday in upcoming:
+            dates = calculate_travel_dates(
+                holiday,
+                flexibility_days=config.flight.flexibility_days,
+            )
+            travel_dates.extend(dates)
+
+        logger.info(f"Gesamt: {len(travel_dates)} Datums-Kombinationen für alle Ferien")
 
     if not travel_dates:
         logger.error("Keine gültigen Reisedaten berechnet!")

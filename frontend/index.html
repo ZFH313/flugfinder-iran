@@ -4,20 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="FlugFinder Iran – Günstige Flüge nach Iran finden">
-    <meta name="theme-color" content="#1a73e8">
+    <meta name="theme-color" content="#0C7B93">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="FlugFinder">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
     <title>FlugFinder Iran</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <header>
         <div class="header-content">
-            <h1>✈️ FlugFinder Iran</h1>
-            <p class="subtitle">Günstige Flüge nach Iran – täglich aktualisiert</p>
+            <h1>🚪✈️ FlugFinder Iran</h1>
+            <p class="subtitle">Günstige Flüge – Herbst | Winter | Ostern | Sommer</p>
         </div>
     </header>
 
@@ -30,7 +31,7 @@
         <!-- Manuelle Suche -->
         <section id="manual-search" class="card">
             <h2>🔍 Flug suchen</h2>
-            <p class="info-text">Wähle Hin- und Rückflug – Suche läuft über alle Flughäfen.</p>
+            <p class="info-text">Wähle dein Reisedatum – Suche läuft über alle 4 Flughäfen × 2 Ziele.</p>
             <div class="search-form">
                 <div class="form-row">
                     <div class="form-group">
@@ -48,38 +49,37 @@
                 <p id="search-status" class="search-status hidden"></p>
             </div>
 
-            <!-- Token Einrichtung (einmalig) -->
-            <div id="token-setup" class="token-section hidden">
-                <h3>⚙️ Einmalige Einrichtung</h3>
-                <p class="info-text">Um die Suche vom Handy zu starten, brauchst du einen GitHub Token. Diesen gibst du nur <strong>einmal</strong> ein.</p>
+            <!-- Token: einmal eingeben, dann gespeichert -->
+            <div id="token-setup" class="token-section">
                 <details class="token-help">
-                    <summary>📖 Wie bekomme ich den Token?</summary>
+                    <summary>⚙️ Ersteinrichtung (einmalig nötig)</summary>
+                    <p style="margin-top:0.5rem; font-size:0.82rem;">Um die Suche direkt vom Handy zu starten brauchst du einen GitHub Token. Nur einmal eingeben!</p>
                     <ol>
-                        <li>Öffne: <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
-                        <li>Klicke "Generate new token (classic)"</li>
+                        <li>Öffne am PC: <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
+                        <li>Klicke <strong>"Generate new token (classic)"</strong></li>
                         <li>Name: <code>FlugFinder</code></li>
+                        <li>Expiration: <strong>No expiration</strong></li>
                         <li>Haken bei <strong>repo</strong> setzen</li>
-                        <li>Unten: "Generate token" klicken</li>
-                        <li>Token kopieren und hier einfügen:</li>
+                        <li>Unten: <strong>"Generate token"</strong> klicken</li>
+                        <li>Token kopieren (beginnt mit <code>ghp_</code>)</li>
                     </ol>
+                    <div class="form-group" style="margin-top:0.5rem;">
+                        <input type="text" id="github-token" placeholder="ghp_xxxxxxxxxxxx..." autocomplete="off" />
+                    </div>
+                    <button class="btn-save" onclick="saveToken()">💾 Speichern</button>
                 </details>
-                <div class="form-group" style="margin-top: 0.5rem;">
-                    <label for="github-token">GitHub Token</label>
-                    <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx..." />
-                </div>
-                <button class="btn-save" onclick="saveToken()">💾 Token speichern</button>
             </div>
 
-            <!-- Token gespeichert Info -->
+            <!-- Token OK -->
             <div id="token-saved" class="token-saved hidden">
-                <span>✅ Verbunden</span>
-                <button class="btn-small" onclick="resetToken()">Token ändern</button>
+                <span>✅ Verbunden – Suche bereit</span>
+                <button class="btn-small" onclick="resetToken()">Ändern</button>
             </div>
         </section>
 
         <!-- Zusammenfassung -->
         <section id="summary" class="card">
-            <h2>📊 Zusammenfassung</h2>
+            <h2>📊 Übersicht</h2>
             <div class="summary-grid">
                 <div class="summary-item">
                     <span class="summary-label">Letzte Suche</span>
@@ -112,15 +112,15 @@
             <div class="filter-bar">
                 <select id="filter-airport" aria-label="Flughafen filtern">
                     <option value="all">Alle Flughäfen</option>
-                    <option value="HAJ">Hannover (HAJ)</option>
-                    <option value="BER">Berlin (BER)</option>
-                    <option value="HAM">Hamburg (HAM)</option>
-                    <option value="FRA">Frankfurt (FRA)</option>
+                    <option value="HAJ">Hannover</option>
+                    <option value="BER">Berlin</option>
+                    <option value="HAM">Hamburg</option>
+                    <option value="FRA">Frankfurt</option>
                 </select>
                 <select id="filter-luggage" aria-label="Gepäck filtern">
                     <option value="all">Mit & ohne Gepäck</option>
-                    <option value="with_luggage">Nur mit Gepäck</option>
-                    <option value="without_luggage">Nur ohne Gepäck</option>
+                    <option value="with_luggage">Mit Gepäck 🧳</option>
+                    <option value="without_luggage">Ohne Gepäck 🎒</option>
                 </select>
                 <select id="filter-destination" aria-label="Ziel filtern">
                     <option value="all">Alle Ziele</option>
@@ -129,7 +129,7 @@
                 </select>
             </div>
             <div class="table-wrapper">
-                <table id="flights-table">
+                <table>
                     <thead>
                         <tr>
                             <th>Route</th>
@@ -137,12 +137,11 @@
                             <th>Preis</th>
                             <th>Airline</th>
                             <th>Stopps</th>
-                            <th>Gepäck</th>
                             <th>Info</th>
                         </tr>
                     </thead>
                     <tbody id="flights-body">
-                        <tr><td colspan="7" class="loading">Lade Daten...</td></tr>
+                        <tr><td colspan="6" class="loading">Noch keine Ergebnisse. Starte eine Suche oben ☝️</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -150,21 +149,21 @@
 
         <!-- Kombi-Tickets -->
         <section id="combo-section" class="card hidden">
-            <h2>🔀 Kombi-Ticket Tipps</h2>
-            <p class="info-text">Günstiger wenn Hin- und Rückflug von verschiedenen Flughäfen</p>
+            <h2>🔀 Kombi-Tickets</h2>
+            <p class="info-text">Günstiger: Hin ab einem Flughafen, Rück zu einem anderen</p>
             <div id="combo-content"></div>
         </section>
 
         <!-- Preis-Analyse -->
         <section id="analysis-section" class="card hidden">
-            <h2>📈 Preis-Analyse pro Route</h2>
+            <h2>📈 Preis-Analyse</h2>
             <div id="analysis-content"></div>
         </section>
     </main>
 
     <footer>
-        <p>FlugFinder Iran – Automatische Flugsuche | Daten via SerpApi (Google Flights)</p>
-        <p class="footer-small">Preise können sich jederzeit ändern. Keine Buchungsgarantie.</p>
+        <p>FlugFinder Iran – Daten via Google Flights</p>
+        <p class="footer-small">4 Flughäfen × 2 Ziele × 4 Ferienzeiten – täglich aktualisiert</p>
     </footer>
 
     <script src="app.js"></script>

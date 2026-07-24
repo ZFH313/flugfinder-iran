@@ -1,6 +1,6 @@
 /**
  * FlugFinder Iran – PWA Frontend App
- * Zeigt Flüge gruppiert nach Ferienperiode.
+ * Zeigt Flüge gruppiert nach Ferienperiode mit Booking-Links.
  */
 const DATA_URL = "data.json";
 let flightData = null;
@@ -42,7 +42,6 @@ function renderSummary() {
     document.getElementById("last-updated").textContent =
         updated.toLocaleDateString("de-DE", {day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"});
 
-    // Anzahl Ferienperioden
     const holidayCount = d.holidays ? d.holidays.length : (d.holiday_period ? d.holiday_period.split("|").length : 0);
     document.getElementById("holiday-count").textContent = holidayCount + " Ferienzeiten";
 
@@ -70,20 +69,16 @@ function renderBanner() {
 function renderHolidayCards() {
     const container = document.getElementById("holiday-cards-container");
 
-    // Neue Struktur: data.holidays[] mit Flügen pro Ferienperiode
     if (flightData.holidays && flightData.holidays.length > 0) {
         container.innerHTML = flightData.holidays.map((holiday, idx) =>
             renderHolidayCard(holiday, idx)
         ).join("");
-    }
-    // Fallback: alte Struktur (flache Liste)
-    else if (flightData.flights && flightData.flights.length > 0) {
+    } else if (flightData.flights && flightData.flights.length > 0) {
         container.innerHTML = renderLegacyFlightCard(flightData.flights);
     } else {
         container.innerHTML = '<div class="card"><p class="loading">Keine Flüge gefunden.</p></div>';
     }
 
-    // Event-Listener für Filter
     container.querySelectorAll(".holiday-filter").forEach(el => {
         el.addEventListener("change", (e) => {
             const cardIdx = e.target.closest(".holiday-card").dataset.idx;
@@ -93,56 +88,61 @@ function renderHolidayCards() {
 }
 
 function renderHolidayCard(holiday, idx) {
-    const dateRange = fmtDate(holiday.start) + " – " + fmtDate(holiday.end);
+    const dateRange = fmtDateLong(holiday.start) + " – " + fmtDateLong(holiday.end);
     const flights = holiday.flights || [];
     const cheapest = flights.length > 0 ? Math.round(flights[0].price_total) + "€" : "–";
     const hasAlert = flights.some(f => f.is_very_cheap);
+    const emoji = getHolidayEmoji(holiday.name);
+    const colorClass = getHolidayColor(holiday.name);
 
-    // Wochenend-Erweiterung Info
     let extInfo = "";
     if (holiday.extended_start && holiday.extended_end) {
-        extInfo = `<span class="ext-badge" title="Inkl. Wochenend-Erweiterung">📅 ${fmtDate(holiday.extended_start)} – ${fmtDate(holiday.extended_end)}</span>`;
+        extInfo = `<div class="ext-badge">📅 Mit Wochenende: ${fmtDate(holiday.extended_start)} – ${fmtDate(holiday.extended_end)}</div>`;
     }
 
     return `
-    <section class="card holiday-card ${hasAlert ? 'holiday-alert' : ''}" data-idx="${idx}">
+    <section class="card holiday-card ${colorClass} ${hasAlert ? 'holiday-alert' : ''}" data-idx="${idx}">
         <div class="holiday-header">
-            <div class="holiday-title-row">
-                <h2>${getHolidayEmoji(holiday.name)} ${holiday.name}</h2>
-                ${hasAlert ? '<span class="alert-badge">GÜNSTIG!</span>' : ''}
+            <div class="holiday-emoji">${emoji}</div>
+            <div class="holiday-info">
+                <h2>${holiday.name}</h2>
+                <div class="holiday-meta">
+                    <span class="holiday-dates">${dateRange}</span>
+                    ${extInfo}
+                </div>
             </div>
-            <div class="holiday-meta">
-                <span class="holiday-dates">${dateRange}</span>
-                ${extInfo}
-                <span class="holiday-cheapest">ab ${cheapest}</span>
+            <div class="holiday-price-badge ${hasAlert ? 'price-alert' : ''}">
+                <span class="price-label">ab</span>
+                <span class="price-value">${cheapest}</span>
+                ${hasAlert ? '<span class="price-tag">DEAL!</span>' : ''}
             </div>
         </div>
 
         <div class="holiday-filters">
             <select class="holiday-filter" data-filter="airport" aria-label="Flughafen">
-                <option value="all">Alle Flughäfen</option>
-                <option value="HAJ">Hannover</option>
-                <option value="BER">Berlin</option>
-                <option value="HAM">Hamburg</option>
-                <option value="FRA">Frankfurt</option>
+                <option value="all">Alle Abflughäfen</option>
+                <option value="HAJ">✈️ Hannover</option>
+                <option value="BER">✈️ Berlin</option>
+                <option value="HAM">✈️ Hamburg</option>
+                <option value="FRA">✈️ Frankfurt</option>
             </select>
             <select class="holiday-filter" data-filter="destination" aria-label="Ziel">
                 <option value="all">Alle Ziele</option>
-                <option value="IKA">Teheran</option>
-                <option value="MHD">Mashhad</option>
+                <option value="IKA">🇮🇷 Teheran</option>
+                <option value="MHD">🇮🇷 Mashhad</option>
             </select>
             <select class="holiday-filter" data-filter="luggage" aria-label="Gepäck">
                 <option value="all">Alle</option>
-                <option value="with_luggage">Mit Gepäck 🧳</option>
-                <option value="without_luggage">Ohne 🎒</option>
+                <option value="with_luggage">🧳 Mit Gepäck</option>
+                <option value="without_luggage">🎒 Handgepäck</option>
             </select>
         </div>
 
         <div class="flight-list" id="flights-${idx}">
-            ${renderFlightCards(flights.slice(0, 10))}
+            ${renderFlightCards(flights.slice(0, 8))}
         </div>
 
-        ${flights.length > 10 ? `<button class="btn-show-more" onclick="showMoreFlights(${idx})">Alle ${flights.length} Flüge zeigen</button>` : ''}
+        ${flights.length > 8 ? `<button class="btn-show-more" onclick="showMoreFlights(${idx})">+ ${flights.length - 8} weitere Flüge anzeigen</button>` : ''}
     </section>`;
 }
 
@@ -152,44 +152,87 @@ function renderFlightCards(flights) {
     }
     return flights.map(f => {
         const badges = [];
-        if (f.is_very_cheap) badges.push('<span class="badge badge-cheap">GÜNSTIG</span>');
-        if (f.is_weekend_flight) badges.push('<span class="badge badge-weekend">WE</span>');
-        if (f.stops_outbound === 0) badges.push('<span class="badge badge-direct">Direkt</span>');
+        if (f.is_very_cheap) badges.push('<span class="badge badge-cheap">🔥 GÜNSTIG</span>');
+        if (f.is_weekend_flight) badges.push('<span class="badge badge-weekend">WE-Flug</span>');
+        if (f.stops_outbound === 0) badges.push('<span class="badge badge-direct">Direktflug</span>');
         const lug = f.luggage === "with_luggage" ? "🧳" : "🎒";
+        const bookingUrl = buildGoogleFlightsUrl(f);
+        const airportNames = {HAJ:"Hannover",BER:"Berlin",HAM:"Hamburg",FRA:"Frankfurt",IKA:"Teheran",MHD:"Mashhad"};
+        const durationHrs = f.duration_outbound_min ? Math.floor(f.duration_outbound_min / 60) + "h " + (f.duration_outbound_min % 60) + "m" : "";
 
         return `
-        <div class="flight-item ${f.is_very_cheap ? 'flight-cheap' : ''}">
-            <div class="flight-route">
-                <strong>${f.departure_airport}</strong> → ${f.destination_airport} ${lug}
+        <a href="${bookingUrl}" target="_blank" rel="noopener noreferrer" class="flight-card-link">
+            <div class="flight-card ${f.is_very_cheap ? 'flight-cheap' : ''}">
+                <div class="flight-card-top">
+                    <div class="flight-route-info">
+                        <div class="flight-airports">
+                            <span class="airport-from">${f.departure_airport}</span>
+                            <span class="flight-arrow">→</span>
+                            <span class="airport-to">${f.destination_airport}</span>
+                            <span class="luggage-icon">${lug}</span>
+                        </div>
+                        <div class="flight-airport-names">
+                            ${airportNames[f.departure_airport] || f.departure_airport} → ${airportNames[f.destination_airport] || f.destination_airport}
+                        </div>
+                    </div>
+                    <div class="flight-price-box">
+                        <span class="flight-price">${Math.round(f.price_total)}€</span>
+                        <span class="flight-price-pp">${Math.round(f.price_per_person)}€/Pers.</span>
+                    </div>
+                </div>
+                <div class="flight-card-bottom">
+                    <div class="flight-meta">
+                        <span class="flight-dates-info">📅 ${fmtDate(f.outbound_date)} – ${fmtDate(f.return_date)}</span>
+                        <span class="flight-airline-info">✈️ ${f.airline || 'Diverse'}</span>
+                        <span class="flight-stops-info">${f.stops_outbound === 0 ? '🟢 Direkt' : '🔵 ' + f.stops_outbound + ' Stopp'}</span>
+                        ${durationHrs ? '<span class="flight-duration">⏱️ ' + durationHrs + '</span>' : ''}
+                    </div>
+                    <div class="flight-badges">${badges.join(' ')}</div>
+                </div>
+                <div class="flight-book-hint">Klicken zum Buchen auf Google Flights →</div>
             </div>
-            <div class="flight-dates">
-                ${fmtDate(f.outbound_date)} – ${fmtDate(f.return_date)}
-            </div>
-            <div class="flight-price">${Math.round(f.price_total)}€</div>
-            <div class="flight-details">
-                <span class="flight-airline">${f.airline || ''}</span>
-                <span class="flight-stops">${f.stops_outbound === 0 ? 'Direkt' : f.stops_outbound + ' Stopp'}</span>
-                ${badges.join(' ')}
-            </div>
-        </div>`;
+        </a>`;
     }).join("");
 }
 
 function renderLegacyFlightCard(flights) {
-    // Fallback für alte data.json ohne holidays-Gruppierung
     return `
-    <section class="card holiday-card" data-idx="0">
+    <section class="card holiday-card holiday-color-blue" data-idx="0">
         <div class="holiday-header">
-            <h2>✈️ Suchergebnisse</h2>
-            <div class="holiday-meta">
-                <span class="holiday-dates">${flightData.holiday_period || ''}</span>
-                <span class="holiday-cheapest">ab ${flights.length > 0 ? Math.round(flights[0].price_total) + '€' : '–'}</span>
+            <div class="holiday-emoji">✈️</div>
+            <div class="holiday-info">
+                <h2>Suchergebnisse</h2>
+                <div class="holiday-meta">
+                    <span class="holiday-dates">${flightData.holiday_period || ''}</span>
+                </div>
+            </div>
+            <div class="holiday-price-badge">
+                <span class="price-label">ab</span>
+                <span class="price-value">${flights.length > 0 ? Math.round(flights[0].price_total) + '€' : '–'}</span>
             </div>
         </div>
         <div class="flight-list" id="flights-0">
             ${renderFlightCards(flights.slice(0, 15))}
         </div>
     </section>`;
+}
+
+// ===================== GOOGLE FLIGHTS URL =====================
+function buildGoogleFlightsUrl(flight) {
+    // Google Flights URL mit vorausgefüllten Parametern
+    const base = "https://www.google.com/travel/flights";
+    const params = new URLSearchParams({
+        q: `Flüge von ${flight.departure_airport} nach ${flight.destination_airport}`,
+        curr: "EUR",
+        hl: "de",
+    });
+    // Google Flights Deep-Link Format
+    // /flights/DEP-ARR/YYYY-MM-DD/YYYY-MM-DD/adults/children
+    const dep = flight.departure_airport;
+    const arr = flight.destination_airport;
+    const out = flight.outbound_date;
+    const ret = flight.return_date;
+    return `https://www.google.com/travel/flights?q=Fl%C3%BCge+von+${dep}+nach+${arr}+am+${out}+R%C3%BCckflug+${ret}&curr=EUR&hl=de`;
 }
 
 // ===================== FILTER PRO KARTE =====================
@@ -212,14 +255,13 @@ function applyHolidayFilter(cardIdx) {
     if (destFilter !== "all") flights = flights.filter(f => f.destination_airport === destFilter);
     if (lugFilter !== "all") flights = flights.filter(f => f.luggage === lugFilter);
 
-    document.getElementById(`flights-${cardIdx}`).innerHTML = renderFlightCards(flights.slice(0, 10));
+    document.getElementById(`flights-${cardIdx}`).innerHTML = renderFlightCards(flights.slice(0, 8));
 }
 
 function showMoreFlights(idx) {
     if (!flightData.holidays || !flightData.holidays[idx]) return;
     const flights = flightData.holidays[idx].flights;
     document.getElementById(`flights-${idx}`).innerHTML = renderFlightCards(flights);
-    // Button entfernen
     const card = document.querySelector(`.holiday-card[data-idx="${idx}"]`);
     const btn = card.querySelector('.btn-show-more');
     if (btn) btn.remove();
@@ -246,7 +288,7 @@ function renderCombos() {
     if (!flightData.combo_tickets?.length) { s.classList.add("hidden"); return; }
     s.classList.remove("hidden");
     c.innerHTML = flightData.combo_tickets.map(x =>
-        `<div class="combo-card"><div class="combo-route">Hin: ${x.departure_airport}→${x.destination_airport} | Rück: →${x.return_airport}</div><div>💰 ${Math.round(x.price_total)}€ – <span class="combo-savings">${Math.round(x.savings)}€ gespart!</span></div></div>`
+        `<div class="combo-card"><div class="combo-route">✈️ Hin: ${x.departure_airport} → ${x.destination_airport} | Rück: → ${x.return_airport}</div><div class="combo-price">💰 ${Math.round(x.price_total)}€ – <span class="combo-savings">${Math.round(x.savings)}€ gespart!</span></div></div>`
     ).join("");
 }
 
@@ -254,6 +296,11 @@ function renderCombos() {
 function fmtDate(d) {
     if (!d) return "–";
     return new Date(d).toLocaleDateString("de-DE", {day:"2-digit", month:"2-digit"});
+}
+
+function fmtDateLong(d) {
+    if (!d) return "–";
+    return new Date(d).toLocaleDateString("de-DE", {day:"2-digit", month:"long", year:"numeric"});
 }
 
 function getHolidayEmoji(name) {
@@ -265,6 +312,17 @@ function getHolidayEmoji(name) {
     if (n.includes("oster")) return "🐣";
     if (n.includes("pfingst")) return "🌸";
     return "📅";
+}
+
+function getHolidayColor(name) {
+    if (!name) return "holiday-color-blue";
+    const n = name.toLowerCase();
+    if (n.includes("sommer")) return "holiday-color-orange";
+    if (n.includes("herbst")) return "holiday-color-amber";
+    if (n.includes("weihnacht") || n.includes("winter")) return "holiday-color-blue";
+    if (n.includes("oster")) return "holiday-color-green";
+    if (n.includes("pfingst")) return "holiday-color-purple";
+    return "holiday-color-blue";
 }
 
 // ===================== SUCHE + TOKEN =====================
@@ -333,18 +391,16 @@ async function triggerManualSearch() {
         );
 
         if (response.status === 204) {
-            showStatus("✅ Suche läuft! " + outbound + " → " + returnDate + ". Ergebnis in 3-5 Min.", "success");
+            showStatus("✅ Suche läuft! Ergebnis in 3-5 Min.", "success");
         } else if (response.status === 401 || response.status === 403) {
             localStorage.removeItem("github_pat");
             setupTokenUI();
-            showStatus("❌ Token ungültig. Bitte neuen Token eingeben.", "error");
-        } else if (response.status === 404) {
-            showStatus("❌ Workflow nicht gefunden.", "error");
+            showStatus("❌ Token ungültig.", "error");
         } else {
             showStatus("❌ Fehler " + response.status, "error");
         }
     } catch (err) {
-        showStatus("❌ Keine Verbindung: " + err.message, "error");
+        showStatus("❌ " + err.message, "error");
     }
 
     btn.disabled = false;

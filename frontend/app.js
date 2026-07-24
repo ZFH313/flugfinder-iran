@@ -219,20 +219,25 @@ function renderLegacyFlightCard(flights) {
 
 // ===================== GOOGLE FLIGHTS URL =====================
 function buildGoogleFlightsUrl(flight) {
-    // Google Flights URL mit vorausgefüllten Parametern
-    const base = "https://www.google.com/travel/flights";
-    const params = new URLSearchParams({
-        q: `Flüge von ${flight.departure_airport} nach ${flight.destination_airport}`,
-        curr: "EUR",
-        hl: "de",
-    });
-    // Google Flights Deep-Link Format
-    // /flights/DEP-ARR/YYYY-MM-DD/YYYY-MM-DD/adults/children
+    // Google Flights Deep-Link mit korrekter Passagier-Anzahl
+    // Format: /travel/flights/DEP-ARR/out/ret?tfs=...&adults=2&children_ages=5,8
     const dep = flight.departure_airport;
     const arr = flight.destination_airport;
-    const out = flight.outbound_date;
+    const out = flight.outbound_date; // YYYY-MM-DD
     const ret = flight.return_date;
-    return `https://www.google.com/travel/flights?q=Fl%C3%BCge+von+${dep}+nach+${arr}+am+${out}+R%C3%BCckflug+${ret}&curr=EUR&hl=de`;
+
+    // Google Flights URL mit Passagieren
+    // passengers: 2 Erwachsene + 2 Kinder (Alter 5 und 8)
+    return `https://www.google.com/travel/flights?hl=de&gl=de&curr=EUR`
+        + `&type=1`  // Round trip
+        + `&opi=89978449`
+        + `&d=${dep}`
+        + `&a=${arr}`
+        + `&dd=${out}`
+        + `&rd=${ret}`
+        + `&px=2`    // 2 Erwachsene
+        + `&cy=5,8`  // 2 Kinder (Alter 5, 8)
+        + `&bags=${flight.luggage === "with_luggage" ? "1" : "0"}`;
 }
 
 // ===================== FILTER PRO KARTE =====================

@@ -40,5 +40,12 @@
     "price_with_luggage": 1956.0,
     "price_without_luggage": 1956.0,
     "cheapest_airline": "Pegasus"
+  },
+  {
+    "search_date": "2026-08-22",
+    "route": "HAJ-IKA",
+    "price_with_luggage": 1394.0,
+    "price_without_luggage": 1586.0,
+    "cheapest_airline": "Pegasus"
   }
 ]

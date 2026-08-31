@@ -251,6 +251,7 @@ def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None =
             result.errors.append(
                 "Kein Suchdienst verfügbar (Kontingent erschöpft oder Zugang fehlt)"
             )
+            result.search_possible = False
         else:
             logger.warning("Suche lief, aber keine Flüge gefunden")
             result.errors.append("Keine Flüge gefunden")
@@ -312,6 +313,18 @@ def send_notifications(config: AppConfig, result: SearchResult) -> None:
 
     if not config.telegram.is_configured():
         logger.warning("Telegram nicht konfiguriert – überspringe Benachrichtigungen")
+        return
+
+    # Konnte gar nicht gesucht werden, ist eine Ergebnis-Zusammenfassung
+    # irreführend: sie sähe aus wie "keine Flüge verfügbar". Stattdessen
+    # eine klare Störungsmeldung, und keinen Preisgraph aus alten Daten.
+    if not result.search_possible:
+        notifier.send_message(
+            "⚠️ <b>Flugsuche nicht ausgeführt</b>\n\n"
+            "Kein Suchdienst war erreichbar – Kontingent erschöpft oder Zugang fehlt.\n\n"
+            "Die zuletzt gefundenen Preise in der App bleiben unverändert."
+        )
+        logger.info("Störungsmeldung gesendet, keine Ergebnis-Zusammenfassung")
         return
 
     send_daily_summary(notifier, result)
@@ -616,7 +629,17 @@ def main():
         send_notifications(config, result)
 
     # Frontend-Daten
-    if not args.no_frontend:
+    # Wenn kein Suchdienst antworten konnte, würde ein Export die zuletzt
+    # gefundenen echten Preise mit einem leeren Ergebnis überschreiben.
+    # Alte Daten sind besser als keine.
+    if args.no_frontend:
+        pass
+    elif not result.search_possible:
+        logger.warning(
+            "Frontend-Export übersprungen – keine Suche möglich, "
+            "bestehende Daten bleiben erhalten"
+        )
+    else:
         export_for_frontend(config, result, holidays_info)
 
     if result.errors and not result.flights:

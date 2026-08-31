@@ -168,6 +168,10 @@ class SearchResult(BaseModel):
 
     # Meta-Info
     total_searches: int = Field(default=0, description="Anzahl API-Anfragen")
+    search_possible: bool = Field(
+        default=True,
+        description="False wenn kein Suchdienst antworten konnte (Kontingent/Zugang)",
+    )
     errors: list[str] = Field(default_factory=list, description="Fehler während der Suche")
     duration_seconds: float = Field(default=0.0, description="Gesamtdauer der Suche")
 

@@ -571,20 +571,67 @@ class SkyScrapperProvider(FlightProvider):
             ) from e
 
         entries = payload.get("data") or []
-        for entry in entries:
-            nav = entry.get("navigation", {})
-            params = nav.get("relevantFlightParams", {})
-            sky_id = params.get("skyId") or entry.get("skyId")
-            entity_id = params.get("entityId") or entry.get("entityId")
-            if sky_id and entity_id:
-                resolved = {"skyId": str(sky_id), "entityId": str(entity_id)}
-                self._airport_ids[iata] = resolved
-                self._save_airport_cache()
-                logger.info(f"[{self.name}] {iata} aufgelöst: {resolved}")
-                return resolved
+        if not entries:
+            logger.error(
+                f"[{self.name}] Leere Antwort bei Auflösung von {iata}. "
+                f"Antwort-Schlüssel: {sorted(payload.keys())}"
+            )
+            return None
 
-        logger.error(f"[{self.name}] Keine IDs für Flughafen {iata} gefunden")
-        return None
+        candidates = [self._extract_place(entry) for entry in entries]
+        candidates = [c for c in candidates if c]
+
+        if not candidates:
+            logger.error(f"[{self.name}] Keine IDs für Flughafen {iata} gefunden")
+            return None
+
+        # Genau diesen Flughafen bevorzugen. Die API liefert Städte zuerst,
+        # und eine Stadt schließt andere Flughäfen ein – bei Teheran etwa den
+        # Inlandsflughafen. Wir wollen den angefragten IATA-Code.
+        exact = [
+            c for c in candidates
+            if c["entityType"] == "AIRPORT" and c["skyId"].upper() == iata.upper()
+        ]
+        any_airport = [c for c in candidates if c["entityType"] == "AIRPORT"]
+        chosen = (exact or any_airport or candidates)[0]
+
+        if not exact:
+            logger.warning(
+                f"[{self.name}] Kein exakter Flughafen-Treffer für {iata}, "
+                f"nutze {chosen['skyId']} ({chosen['entityType']}). "
+                f"Alternativen: {[(c['skyId'], c['entityType']) for c in candidates[:5]]}"
+            )
+
+        resolved = {"skyId": chosen["skyId"], "entityId": chosen["entityId"]}
+        self._airport_ids[iata] = resolved
+        self._save_airport_cache()
+        logger.info(
+            f"[{self.name}] {iata} aufgelöst: {resolved} ({chosen['entityType']})"
+        )
+        return resolved
+
+    @staticmethod
+    def _extract_place(entry: dict[str, Any]) -> dict[str, str] | None:
+        """Holt skyId, entityId und Typ aus einem Ort-Eintrag der Antwort."""
+        nav = entry.get("navigation") or {}
+        params = nav.get("relevantFlightParams") or {}
+
+        sky_id = params.get("skyId") or entry.get("skyId")
+        entity_id = params.get("entityId") or nav.get("entityId") or entry.get("entityId")
+        entity_type = (
+            params.get("flightPlaceType")
+            or nav.get("entityType")
+            or ""
+        )
+
+        if not sky_id or not entity_id:
+            return None
+
+        return {
+            "skyId": str(sky_id),
+            "entityId": str(entity_id),
+            "entityType": str(entity_type).upper(),
+        }
 
     # --- Suche ---
 
@@ -612,7 +659,9 @@ class SkyScrapperProvider(FlightProvider):
             "cabinClass": "economy",
             "adults": flight_config.adults,
             "childrens": flight_config.num_children,
-            "sortBy": "price_high",
+            # "best" ist der neutrale Standardwert. Zuvor stand hier
+            # "price_high" – das hätte die teuersten Flüge zuerst geliefert.
+            "sortBy": "best",
             "currency": "EUR",
             "market": "de-DE",
             "countryCode": "DE",
@@ -650,6 +699,10 @@ class SkyScrapperProvider(FlightProvider):
 
                 itineraries = (data.get("data") or {}).get("itineraries") or []
                 logger.info(f"[{self.name}] {origin}→{destination}: {len(itineraries)} Angebote")
+
+                if not itineraries:
+                    self._log_empty_response(data, origin, destination)
+
                 return data
 
             except QuotaExceededError:
@@ -670,6 +723,44 @@ class SkyScrapperProvider(FlightProvider):
                 return {}
 
         return {}
+
+    def _log_empty_response(
+        self, data: dict[str, Any], origin: str, destination: str
+    ) -> None:
+        """
+        Protokolliert die Struktur einer Antwort ohne Treffer.
+
+        Ohne diese Ausgabe lässt sich nicht unterscheiden, ob die API
+        tatsächlich keine Flüge kennt, ob sie einen Fehler im Rumpf meldet,
+        oder ob die Ergebnisse an einer anderen Stelle im JSON stehen als
+        erwartet. Jeder Testlauf kostet Kontingent, also muss ein einzelner
+        Lauf die Antwort erklären.
+        """
+        prefix = f"[{self.name}] {origin}→{destination} ohne Treffer"
+
+        logger.warning(f"{prefix} – Antwort-Schlüssel: {sorted(data.keys())}")
+
+        for key in ("status", "message", "error", "errors", "timestamp"):
+            if key in data:
+                logger.warning(f"{prefix} – {key}: {str(data[key])[:300]}")
+
+        payload = data.get("data")
+        if isinstance(payload, dict):
+            logger.warning(f"{prefix} – data-Schlüssel: {sorted(payload.keys())}")
+            context = payload.get("context")
+            if isinstance(context, dict):
+                logger.warning(f"{prefix} – context: {str(context)[:300]}")
+            # Manche Varianten liefern die Ergebnisse unter anderem Namen
+            for alt in ("itineraries", "results", "flights", "legs", "buckets"):
+                value = payload.get(alt)
+                if isinstance(value, list):
+                    logger.warning(f"{prefix} – data.{alt}: {len(value)} Einträge")
+        elif isinstance(payload, list):
+            logger.warning(f"{prefix} – data ist eine Liste mit {len(payload)} Einträgen")
+        else:
+            logger.warning(f"{prefix} – data-Typ: {type(payload).__name__}")
+
+        logger.debug(f"{prefix} – Rohantwort (gekürzt): {str(data)[:1500]}")
 
     def _raise_for_quota(self, response: requests.Response) -> None:
         """

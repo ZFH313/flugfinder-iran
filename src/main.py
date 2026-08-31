@@ -559,6 +559,13 @@ def main():
         action="store_true",
         help="Auch die sekundären Ziele (Mashhad) durchsuchen – verdoppelt die API-Anfragen",
     )
+    parser.add_argument(
+        "--max-calls",
+        type=int,
+        metavar="N",
+        help="Anfrage-Budget für diesen Lauf überschreiben. Für sparsame "
+             "Diagnoseläufe, z.B. --max-calls 2",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="DEBUG Log-Level")
 
     args = parser.parse_args()
@@ -568,9 +575,18 @@ def main():
 
     logger.info("🛫 FlugFinder Iran gestartet")
 
-    # Konfiguration laden – Ziel-Rotation vor dem Logging setzen
+    # Konfiguration laden – Anpassungen vor dem Logging setzen
     config = AppConfig()
     config.flight.include_secondary_destinations = args.all_destinations
+    if args.max_calls is not None:
+        if args.max_calls < 1:
+            logger.error("--max-calls muss mindestens 1 sein")
+            sys.exit(1)
+        logger.info(
+            f"Anfrage-Budget überschrieben: {args.max_calls} "
+            f"(Standard: {config.flight.max_api_calls_per_run})"
+        )
+        config.flight.max_api_calls_per_run = args.max_calls
     config = load_config(config)
 
     # Manuelle Daten?

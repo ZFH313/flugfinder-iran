@@ -26,6 +26,10 @@ on:
         required: false
         type: boolean
         default: false
+      max_calls:
+        description: 'Anfrage-Budget begrenzen (leer = Standard). Für sparsame Diagnose z.B. 2'
+        required: false
+        type: string
 
 jobs:
   search:
@@ -54,6 +58,7 @@ jobs:
           INPUT_ALL_DEST: ${{ github.event.inputs.all_destinations }}
           INPUT_DATES: ${{ github.event.inputs.dates }}
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          INPUT_MAX_CALLS: ${{ github.event.inputs.max_calls }}
         run: |
           ARGS="--verbose"
 
@@ -68,6 +73,11 @@ jobs:
           if [ -n "$INPUT_DATES" ]; then
             ARGS="$ARGS --dates $INPUT_DATES"
             echo "Manuelles Datum: $INPUT_DATES"
+          fi
+
+          if [ -n "$INPUT_MAX_CALLS" ]; then
+            ARGS="$ARGS --max-calls $INPUT_MAX_CALLS"
+            echo "Anfrage-Budget begrenzt auf: $INPUT_MAX_CALLS"
           fi
 
           if [ "$INPUT_DRY_RUN" = "true" ]; then
@@ -94,8 +104,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Ergebnisse committen und pushen
-        # Beim Dry-Run entstehen keine Ergebnisse, also nichts zu committen
-        if: ${{ steps.mode.outputs.is_dry_run != 'true' }}
+        # Läuft auch wenn die Suche fehlschlug: der Flughafen-ID-Cache soll
+        # erhalten bleiben, sonst kostet jeder Folgelauf erneut Anfragen für
+        # dieselbe Auflösung. Beim Dry-Run entsteht nichts zu committen.
+        if: ${{ !cancelled() && steps.mode.outputs.is_dry_run != 'true' }}
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"

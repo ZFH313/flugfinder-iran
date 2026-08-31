@@ -4,11 +4,21 @@ name: Flight Search
 # über die GitHub-API startet (frontend/app.js).
 
 on:
-  schedule:
-    # Montag: nur Teheran (4 Abflughäfen × 1 Ziel × 3 Termine = 12 Anfragen)
-    - cron: '0 6 * * 1'
-    # Donnerstag: zusätzlich Mashhad (4 × 2 × 3 = 24 Anfragen)
-    - cron: '0 6 * * 4'
+  # ------------------------------------------------------------------
+  # AUTOMATIK VORÜBERGEHEND AUS
+  #
+  # Grund: der neu geschriebene SerpApi-Provider hat noch nie erfolgreich
+  # Flüge geliefert. Ein unbeaufsichtigter Donnerstagslauf würde 24 von 100
+  # Monats-Credits auf unerprobten Code setzen.
+  #
+  # Wieder einschalten sobald ein manueller Lauf Flüge gefunden hat:
+  # einfach die beiden cron-Zeilen entkommentieren.
+  # ------------------------------------------------------------------
+  # schedule:
+  #   # Montag: nur Teheran (4 Abflughäfen × 1 Ziel × 3 Termine = 12 Anfragen)
+  #   - cron: '0 6 * * 1'
+  #   # Donnerstag: zusätzlich Mashhad (4 × 2 × 3 = 24 Anfragen)
+  #   - cron: '0 6 * * 4'
 
   workflow_dispatch:
     inputs:

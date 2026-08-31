@@ -67,8 +67,25 @@ Gesteuert über das CLI-Flag `--all-destinations`. Der Workflow entscheidet anha
 | `max_api_calls_per_run` | 24 | deckt den größeren Donnerstags-Lauf ab |
 | `max_date_pairs_per_holiday` | 1 | jede Ferienzeit bekommt genau einen Termin |
 | `max_holidays_per_run` | 3 | nur Perioden mit buchbaren Terminen zählen |
+| `abort_after_empty_searches` | 3 | Notbremse bei strukturellem Fehler |
 | `enable_combo_tickets` | False | kostet allein ~32 Anfragen, daher bewusst aus |
-| Cron | Mo + Do | ~8,7 Läufe/Monat |
+| Cron | **aus** | auskommentiert bis Suche bestätigt ist |
+
+### Credits schonen – verbindliche Reihenfolge
+Ein Lauf kostet echtes Kontingent, und beide Free-Tiers sind klein. Nach jeder Änderung am Suchpfad in dieser Reihenfolge prüfen:
+
+1. `dry_run` – kostenlos, prüft Suchplan und Budget
+2. `max_calls=1` – eine einzige echte Anfrage
+3. `max_calls=4` – ein Datumspaar über alle Abflughäfen
+4. unbegrenzt
+
+Die Notbremse in `search_all_routes()` bricht ab, sobald mehrere erfolgreiche Suchen zusammen keinen Flug liefern. Ohne sie kostet ein struktureller Fehler das volle Budget statt drei Anfragen.
+
+### Stand der Provider (Erfahrungswerte)
+| Dienst | Zuletzt nachweislich erfolgreich | Anmerkung |
+|---|---|---|
+| SerpApi | 22.08.2026, **alter Code** | Der umgeschriebene Provider ist unerprobt |
+| Sky Scrapper | nie | Auflösung klappt, Suche liefert 0 Treffer; Kontingent nach ~21 Anfragen erschöpft |
 
 **Monatsrechnung:** (12 + 24) × 4,35 Wochen ≈ **156 Anfragen/Monat**. SerpApi deckt die ersten ~100 ab, den Rest übernimmt Sky Scrapper.
 

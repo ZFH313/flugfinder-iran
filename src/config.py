@@ -137,6 +137,13 @@ class FlightConfig:
     # einzelne Periode mehrere Varianten belegt.
     max_date_pairs_per_holiday: int = 1
 
+    # Notbremse: Liefern die ersten N erfolgreichen Suchen zusammen keinen
+    # einzigen Flug, bricht der Lauf ab. Schützt davor dass ein struktureller
+    # Fehler (falsche Parameter, geändertes Antwortformat) das ganze
+    # Monatskontingent für leere Ergebnisse verbrennt.
+    # 0 schaltet die Notbremse ab.
+    abort_after_empty_searches: int = 3
+
     # Wie viele Ferienperioden maximal durchsuchen.
     # Gezählt werden nur Perioden die tatsächlich buchbare Termine liefern –
     # bereits laufende Ferien mit zu wenig Restzeit fallen vorher raus.

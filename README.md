@@ -128,10 +128,23 @@ In deinem GitHub Repository unter **Settings → Secrets and variables → Actio
 
 ### Automatische Suche
 
-Die Suche läuft zweimal pro Woche um 8:00 Uhr deutscher Zeit:
+> **Derzeit abgeschaltet.** Die cron-Einträge in `daily_search.yml` sind auskommentiert, solange nicht bestätigt ist dass die Suche Flüge liefert. So verbrennt kein unbeaufsichtigter Lauf das Monatskontingent. Zum Einschalten die beiden `cron`-Zeilen entkommentieren.
+
+Vorgesehen ist zweimal pro Woche um 8:00 Uhr deutscher Zeit:
 
 - **Montag** – nur Teheran (12 Anfragen)
 - **Donnerstag** – Teheran und Mashhad (24 Anfragen)
+
+### Sparsam vorgehen
+
+Ein Lauf kostet echte Credits. Reihenfolge zum Prüfen nach Änderungen:
+
+1. `dry_run` ankreuzen – kostet nichts, zeigt Suchplan und Budget
+2. `max_calls` auf **1** – eine einzige echte Anfrage, prüft ob Flüge ankommen
+3. `max_calls` auf 4 – eine Datumskombination über alle Abflughäfen
+4. Ohne Begrenzung laufen lassen
+
+Eine Notbremse (`abort_after_empty_searches`, Standard 3) bricht den Lauf ab, wenn mehrere erfolgreiche Suchen keinen einzigen Flug liefern. Das begrenzt den Schaden bei einem strukturellen Fehler auf drei Anfragen statt vierundzwanzig.
 
 **Manuelle Suche starten:**
 1. **Actions** Tab → "Flight Search"

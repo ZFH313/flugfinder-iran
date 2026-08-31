@@ -203,10 +203,19 @@ def search_all_routes(
 
     all_flights: list[FlightOffer] = []
     skipped = 0
+    empty_searches = 0
+    aborted = False
+    abort_threshold = flight_config.abort_after_empty_searches
 
     for outbound_date, return_date in travel_dates:
+        if aborted:
+            break
         for dep_airport in flight_config.departure_airports:
+            if aborted:
+                break
             for dest_airport in flight_config.destination_airports:
+                if aborted:
+                    break
                 for luggage_type in luggage_variants:
                     if not client.has_capacity():
                         skipped += 1
@@ -221,10 +230,39 @@ def search_all_routes(
                             flight_config=flight_config,
                             luggage_type=luggage_type,
                         )
-                        all_flights.extend(flights)
                     except BudgetExhaustedError as e:
                         logger.warning(f"Suche abgebrochen: {e}")
                         skipped += 1
+                        continue
+
+                    all_flights.extend(flights)
+
+                    # Notbremse: mehrere erfolgreiche Suchen ohne jeden Treffer
+                    # deuten auf einen strukturellen Fehler, nicht auf einen
+                    # leeren Markt. Dann lieber abbrechen als das Kontingent
+                    # für weitere Leerläufe ausgeben.
+                    if flights:
+                        empty_searches = 0
+                    else:
+                        empty_searches += 1
+
+                    if (
+                        abort_threshold > 0
+                        and not all_flights
+                        and empty_searches >= abort_threshold
+                    ):
+                        logger.error(
+                            f"Notbremse: {empty_searches} Suchen erfolgreich abgesetzt, "
+                            f"aber kein einziger Flug gefunden. Lauf wird abgebrochen, "
+                            f"um Kontingent zu schonen."
+                        )
+                        logger.error(
+                            "Mögliche Ursachen: geänderte Suchparameter, geändertes "
+                            "Antwortformat, oder zu strenge Filter. Details siehe "
+                            "die Warnungen oberhalb."
+                        )
+                        aborted = True
+                        break
 
     if skipped:
         logger.warning(

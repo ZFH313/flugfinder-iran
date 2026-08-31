@@ -44,6 +44,13 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+# Fremdbibliotheken ruhigstellen. Ohne das flutet --verbose das Log mit
+# hunderten Zeilen Font-Suche von matplotlib und HTTP-Details von urllib3,
+# in denen die eigentliche Diagnose untergeht.
+for _noisy in ("matplotlib", "matplotlib.font_manager", "PIL", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 

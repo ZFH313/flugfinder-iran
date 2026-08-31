@@ -25,6 +25,12 @@ from .models import FlightOffer, FlightSegment, LuggageType
 
 logger = logging.getLogger(__name__)
 
+# Platzhalter für nicht lesbare Zeitangaben.
+# Wichtig: Filter müssen diesen Wert erkennen und durchlassen, statt den Flug
+# zu verwerfen. Sonst würde ein Formatwechsel der API alle Treffer lautlos
+# aussortieren, weil "00:00" außerhalb jedes erlaubten Zeitfensters liegt.
+UNKNOWN_TIME = datetime(2000, 1, 1)
+
 
 class QuotaExceededError(Exception):
     """
@@ -87,11 +93,26 @@ class FlightProvider(ABC):
     def _passes_departure_time_filter(
         self, segments: list[FlightSegment], flight_config: FlightConfig
     ) -> bool:
-        """Prüft ob die Abflugzeit in den gewünschten Zeitraum fällt."""
+        """
+        Prüft ob die Abflugzeit in den gewünschten Zeitraum fällt.
+
+        Ist die Zeit nicht lesbar, wird der Flug durchgelassen. Lieber ein
+        Flug mit unbekannter Abflugzeit als ein leeres Ergebnis, weil sich
+        das Datumsformat der API geändert hat.
+        """
         time_range = flight_config.get_departure_time_range()
         if not time_range or not segments:
             return True
-        dep_time = segments[0].departure_time.strftime("%H:%M")
+
+        departure = segments[0].departure_time
+        if departure == UNKNOWN_TIME:
+            logger.warning(
+                f"[{self.name}] Abflugzeit unbekannt – Zeitfilter übersprungen "
+                f"({segments[0].departure_airport}→{segments[0].arrival_airport})"
+            )
+            return True
+
+        dep_time = departure.strftime("%H:%M")
         return time_range[0] <= dep_time <= time_range[1]
 
 
@@ -142,7 +163,9 @@ class SerpApiProvider(FlightProvider):
         if not raw:
             return []
 
-        flights = self._parse(raw, origin, destination, luggage_type, flight_config)
+        flights = self._parse(
+            raw, origin, destination, luggage_type, flight_config, outbound_date
+        )
         # SerpApi liefert das Rückflugdatum nicht zuverlässig mit → setzen
         for flight in flights:
             flight.return_date = return_date
@@ -252,6 +275,7 @@ class SerpApiProvider(FlightProvider):
         destination: str,
         luggage_type: LuggageType,
         flight_config: FlightConfig,
+        search_date: date,
     ) -> list[FlightOffer]:
         """Wandelt die SerpApi-Antwort in FlightOffer-Objekte um."""
         results = raw_data.get("best_flights", []) + raw_data.get("other_flights", [])
@@ -259,11 +283,26 @@ class SerpApiProvider(FlightProvider):
 
         for result in results:
             try:
-                offer = self._parse_one(result, origin, destination, luggage_type, flight_config)
+                offer = self._parse_one(
+                    result, origin, destination, luggage_type, flight_config, search_date
+                )
                 if offer:
                     flights.append(offer)
             except (KeyError, ValueError, IndexError, TypeError) as e:
                 logger.warning(f"[{self.name}] Angebot nicht lesbar: {e}")
+
+        # Sichtbar machen wenn Angebote ankamen, aber alle an Filtern scheitern.
+        # Ohne diese Zeile sieht ein Filterproblem wie "keine Flüge verfügbar" aus.
+        if results and not flights:
+            logger.warning(
+                f"[{self.name}] {origin}→{destination}: {len(results)} Angebote von der API, "
+                f"aber 0 nach Filtern (Stopps, Abflugzeit, Umsteigezeit) übrig"
+            )
+        elif results:
+            logger.debug(
+                f"[{self.name}] {origin}→{destination}: "
+                f"{len(flights)} von {len(results)} Angeboten übernommen"
+            )
 
         return flights
 
@@ -274,6 +313,7 @@ class SerpApiProvider(FlightProvider):
         destination: str,
         luggage_type: LuggageType,
         flight_config: FlightConfig,
+        search_date: date,
     ) -> FlightOffer | None:
         price_total = result.get("price")
         if price_total is None:
@@ -283,7 +323,7 @@ class SerpApiProvider(FlightProvider):
         if not legs:
             return None
 
-        segments = self._parse_segments(legs)
+        segments = self._parse_segments(legs, search_date)
         if not segments:
             return None
 
@@ -294,7 +334,9 @@ class SerpApiProvider(FlightProvider):
         if not self._connection_time_ok(layovers, flight_config.min_connection_time_hours):
             return None
 
-        outbound_date = segments[0].departure_time.date()
+        # Datum aus dem Flug übernehmen, sonst das angefragte Suchdatum
+        parsed_date = segments[0].departure_time.date()
+        outbound_date = search_date if parsed_date.year < 2000 else parsed_date
         airline = legs[0].get("airline", "")
 
         from .school_holidays import is_weekend_departure
@@ -319,7 +361,9 @@ class SerpApiProvider(FlightProvider):
             source=self.name,
         )
 
-    def _parse_segments(self, legs: list[dict[str, Any]]) -> list[FlightSegment]:
+    def _parse_segments(
+        self, legs: list[dict[str, Any]], search_date: date
+    ) -> list[FlightSegment]:
         segments: list[FlightSegment] = []
         for leg in legs:
             dep = leg.get("departure_airport", {})
@@ -328,8 +372,12 @@ class SerpApiProvider(FlightProvider):
                 FlightSegment(
                     departure_airport=dep.get("id", "???"),
                     arrival_airport=arr.get("id", "???"),
-                    departure_time=_parse_serpapi_datetime(dep.get("time", "")),
-                    arrival_time=_parse_serpapi_datetime(arr.get("time", "")),
+                    departure_time=_parse_serpapi_datetime(
+                        dep.get("time", ""), search_date, dep.get("date", "")
+                    ),
+                    arrival_time=_parse_serpapi_datetime(
+                        arr.get("time", ""), search_date, arr.get("date", "")
+                    ),
                     airline=leg.get("airline", ""),
                     flight_number=str(leg.get("flight_number", "")),
                     duration_minutes=leg.get("duration", 0),
@@ -354,19 +402,56 @@ class SerpApiProvider(FlightProvider):
         return True
 
 
-def _parse_serpapi_datetime(value: str) -> datetime:
+def _parse_serpapi_datetime(
+    value: str,
+    reference_date: date | None = None,
+    date_hint: str = "",
+) -> datetime:
     """
     Parst SerpApi-Zeitangaben.
-    Übliches Format: '2026-12-23 08:30'.
+
+    SerpApi liefert im Feld 'time' meist Datum und Uhrzeit ('2026-12-23 08:30'),
+    gelegentlich aber nur die Uhrzeit ('08:30'). Eine reine Uhrzeit wird am
+    mitgegebenen Datum verankert – sie darf nicht verworfen werden, sonst
+    entsteht '00:00' und der Nachtflug-Filter löscht alle Treffer.
+
+    Args:
+        value: Der Wert aus dem 'time'-Feld
+        reference_date: Suchdatum, an dem eine reine Uhrzeit verankert wird
+        date_hint: Optionales separates 'date'-Feld aus der Antwort
+
+    Returns:
+        Geparste Zeit, oder UNKNOWN_TIME wenn nichts passt
     """
     if not value:
-        return datetime(2000, 1, 1)
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %I:%M %p"):
+        return UNKNOWN_TIME
+
+    # Datum und Uhrzeit in einem Feld
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %I:%M %p"):
         try:
             return datetime.strptime(value, fmt)
         except ValueError:
             continue
-    return datetime(2000, 1, 1)
+
+    # Separates Datumsfeld mit der Uhrzeit kombinieren
+    if date_hint:
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %I:%M %p"):
+            try:
+                return datetime.strptime(f"{date_hint} {value}", fmt)
+            except ValueError:
+                continue
+
+    # Nur Uhrzeit → am Suchdatum verankern
+    for fmt in ("%H:%M", "%I:%M %p"):
+        try:
+            parsed = datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        anchor = reference_date or UNKNOWN_TIME.date()
+        return datetime.combine(anchor, parsed.time())
+
+    logger.warning(f"[serpapi] Zeitangabe nicht lesbar: {value!r}")
+    return UNKNOWN_TIME
 
 
 # =====================================================================
@@ -606,6 +691,17 @@ class SkyScrapperProvider(FlightProvider):
             except (KeyError, ValueError, IndexError, TypeError) as e:
                 logger.warning(f"[{self.name}] Angebot nicht lesbar: {e}")
 
+        if itineraries and not flights:
+            logger.warning(
+                f"[{self.name}] {origin}→{destination}: {len(itineraries)} Angebote von der API, "
+                f"aber 0 nach Filtern übrig"
+            )
+        elif itineraries:
+            logger.debug(
+                f"[{self.name}] {origin}→{destination}: "
+                f"{len(flights)} von {len(itineraries)} Angeboten übernommen"
+            )
+
         return flights
 
     def _parse_one(
@@ -735,16 +831,21 @@ def _first_carrier_name(leg: dict[str, Any]) -> str:
 
 
 def _parse_iso_datetime(value: str) -> datetime:
-    """Parst ISO-Zeitangaben wie '2026-12-23T08:30:00'."""
+    """
+    Parst ISO-Zeitangaben wie '2026-12-23T08:30:00'.
+
+    Gibt bei Misserfolg UNKNOWN_TIME zurück und protokolliert das.
+    """
     if not value:
-        return datetime(2000, 1, 1)
+        return UNKNOWN_TIME
     cleaned = value.replace("Z", "")
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
             return datetime.strptime(cleaned, fmt)
         except ValueError:
             continue
-    return datetime(2000, 1, 1)
+    logger.warning(f"[skyscrapper] Zeitangabe nicht lesbar: {value!r}")
+    return UNKNOWN_TIME
 
 
 # =====================================================================

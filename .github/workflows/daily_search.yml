@@ -85,6 +85,11 @@ jobs:
         env:
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          RAPIDAPI_HOST: ${{ vars.RAPIDAPI_HOST }}
+          # Optional: Reihenfolge der Suchdienste überschreiben, z.B.
+          # "skyscrapper" um einen ausgefallenen Dienst zu überspringen.
+          # Anzulegen unter Settings → Variables (kein Secret nötig).
+          PROVIDER_ORDER: ${{ vars.PROVIDER_ORDER }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 

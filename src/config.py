@@ -12,6 +12,22 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+#: Standard-Reihenfolge der Suchdienste
+DEFAULT_PROVIDER_ORDER = ["serpapi", "skyscrapper"]
+
+
+def _provider_order_from_env() -> list[str]:
+    """
+    Liest die Provider-Reihenfolge aus PROVIDER_ORDER (kommagetrennt).
+
+    Nützlich wenn ein Dienst bekanntlich ausgefallen ist: dann lässt sich
+    die Kette ohne Code-Änderung umstellen, etwa über eine GitHub-Variable.
+    """
+    raw = os.getenv("PROVIDER_ORDER", "").strip()
+    if not raw:
+        return list(DEFAULT_PROVIDER_ORDER)
+    return [name.strip() for name in raw.split(",") if name.strip()]
+
 
 @dataclass
 class FlightConfig:
@@ -77,9 +93,12 @@ class FlightConfig:
     # Reihenfolge in der die Suchdienste probiert werden. Ist ein Dienst
     # nicht konfiguriert oder sein Kontingent erschöpft, übernimmt der nächste.
     # Gültige Werte: "serpapi", "skyscrapper"
-    provider_order: list[str] = field(
-        default_factory=lambda: ["serpapi", "skyscrapper"]
-    )
+    #
+    # Per Umgebungsvariable überschreibbar, um einen bekannt ausgefallenen
+    # Dienst zu überspringen ohne den Code zu ändern:
+    #   PROVIDER_ORDER=skyscrapper              → nur Sky Scrapper
+    #   PROVIDER_ORDER=skyscrapper,serpapi      → Reihenfolge tauschen
+    provider_order: list[str] = field(default_factory=lambda: _provider_order_from_env())
 
     # --- API-Budget (SerpApi Free-Tier: 100 Suchen/Monat) ---
     #

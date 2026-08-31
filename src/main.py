@@ -239,8 +239,21 @@ def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None =
         return result, holidays_info
 
     if not flights:
-        logger.warning("Keine Flüge gefunden!")
-        result.errors.append("Keine Flüge gefunden")
+        # Unterscheiden: konnte gar nicht gesucht werden, oder wurde gesucht
+        # und es gab nichts? Das erste ist ein Konfigurations- bzw.
+        # Kontingentproblem, das zweite ein echtes Marktergebnis.
+        if client.searches_served == 0:
+            logger.error(
+                "Kein Suchdienst konnte antworten – Kontingent erschöpft oder Zugang fehlt"
+            )
+            for provider in client.providers:
+                logger.error(f"  {provider.display_name}: nicht verfügbar")
+            result.errors.append(
+                "Kein Suchdienst verfügbar (Kontingent erschöpft oder Zugang fehlt)"
+            )
+        else:
+            logger.warning("Suche lief, aber keine Flüge gefunden")
+            result.errors.append("Keine Flüge gefunden")
         return result, holidays_info
 
     # --- 3. Preisanalyse ---

@@ -658,16 +658,30 @@ class SkyScrapperProvider(FlightProvider):
 
     def _raise_for_quota(self, response: requests.Response) -> None:
         """
-        RapidAPI meldet Kontingent-Ende mit 429, teilweise auch mit 403.
+        Prüft die Antwort auf Kontingent- und Zugangsprobleme.
+
+        Wichtig ist die Unterscheidung: ein fehlendes Abo ist ein
+        Einrichtungsfehler den man beheben kann, ein erschöpftes Kontingent
+        dagegen eine Frage der Zeit. Beides braucht andere Hinweise.
         """
         if response.status_code == 429:
             raise QuotaExceededError(
                 "Sky Scrapper: RapidAPI-Kontingent erschöpft (429)"
             )
+
         if response.status_code == 403:
             body = (response.text or "").lower()
-            if "quota" in body or "not subscribed" in body:
-                raise QuotaExceededError(f"Sky Scrapper: Zugriff verweigert – {response.text[:200]}")
+            if "not subscribed" in body:
+                raise ProviderError(
+                    "Sky Scrapper: Der RapidAPI-Key ist für diese API nicht freigeschaltet. "
+                    "Auf rapidapi.com die Sky-Scrapper-API öffnen und dort den kostenlosen "
+                    "Plan abonnieren – ein Key allein genügt nicht."
+                )
+            if "quota" in body:
+                raise QuotaExceededError(
+                    f"Sky Scrapper: Kontingent erschöpft – {response.text[:200]}"
+                )
+            raise ProviderError(f"Sky Scrapper: Zugriff verweigert – {response.text[:200]}")
 
     def _parse(
         self,

@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: false
+      dry_run:
+        description: 'Nur Suchplan und Budget anzeigen – verbraucht KEINE API-Anfragen'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   search:
@@ -48,6 +53,7 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           INPUT_ALL_DEST: ${{ github.event.inputs.all_destinations }}
           INPUT_DATES: ${{ github.event.inputs.dates }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: |
           ARGS="--verbose"
 
@@ -64,6 +70,14 @@ jobs:
             echo "Manuelles Datum: $INPUT_DATES"
           fi
 
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+            echo "DRY RUN – es werden keine API-Anfragen gesendet"
+            echo "is_dry_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 
       - name: Flugsuche starten
@@ -75,9 +89,20 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Ergebnisse committen und pushen
+        # Beim Dry-Run entstehen keine Ergebnisse, also nichts zu committen
+        if: ${{ steps.mode.outputs.is_dry_run != 'true' }}
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add frontend/data.json results/ data/price_history.json data/airport_ids.json
+
+          # Nur Pfade hinzufügen die tatsächlich existieren.
+          # data/airport_ids.json entsteht erst wenn Sky Scrapper einspringt,
+          # ein pauschales "git add" würde sonst mit Fehler abbrechen.
+          for path in frontend/data.json results data/price_history.json data/airport_ids.json; do
+            if [ -e "$path" ]; then
+              git add "$path"
+            fi
+          done
+
           git diff --staged --quiet || git commit -m "Flugsuch-Ergebnisse $(date +'%Y-%m-%d %H:%M')"
           git push

@@ -499,7 +499,14 @@ class SkyScrapperProvider(FlightProvider):
 
     @property
     def _base_url(self) -> str:
-        return f"https://{self.config.host}"
+        host = (self.config.host or "").strip()
+        if not host:
+            raise ProviderError(
+                "Sky Scrapper: Kein Host gesetzt. RAPIDAPI_HOST ist leer – "
+                "entweder nicht setzen (dann greift der Standardwert) oder "
+                "auf den Host aus dem RapidAPI-Codebeispiel setzen."
+            )
+        return f"https://{host}"
 
     # --- Flughafen-IDs ---
 
@@ -533,6 +540,13 @@ class SkyScrapperProvider(FlightProvider):
         """
         Löst einen IATA-Code zu skyId und entityId auf.
         Ergebnisse werden gecacht, da sie sich praktisch nie ändern.
+
+        Raises:
+            ProviderError: Die Anfrage selbst scheiterte (falscher Host,
+                Netzwerkfehler, unlesbare Antwort). Solche Fehler wiederholen
+                sich bei jedem Flughafen, deshalb wird der Provider dadurch
+                stillgelegt statt hunderte Male dasselbe zu versuchen.
+            QuotaExceededError: Kontingent erschöpft.
         """
         if iata in self._airport_ids:
             return self._airport_ids[iata]
@@ -549,11 +563,12 @@ class SkyScrapperProvider(FlightProvider):
             self._raise_for_quota(response)
             response.raise_for_status()
             payload = response.json()
-        except QuotaExceededError:
+        except (QuotaExceededError, ProviderError):
             raise
         except (requests.RequestException, ValueError) as e:
-            logger.error(f"[{self.name}] Flughafen-Auflösung für {iata} fehlgeschlagen: {e}")
-            return None
+            raise ProviderError(
+                f"Sky Scrapper: Flughafen-Auflösung für {iata} fehlgeschlagen: {e}"
+            ) from e
 
         entries = payload.get("data") or []
         for entry in entries:

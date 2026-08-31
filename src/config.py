@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 #: Standard-Reihenfolge der Suchdienste
 DEFAULT_PROVIDER_ORDER = ["serpapi", "skyscrapper"]
 
+#: Standard-Host der Sky-Scrapper-API auf RapidAPI
+DEFAULT_RAPIDAPI_HOST = "sky-scrapper.p.rapidapi.com"
+
+
+def _env_or_default(name: str, default: str) -> str:
+    """
+    Liest eine Umgebungsvariable und behandelt Leerstring wie "nicht gesetzt".
+
+    Nötig weil os.getenv(name, default) den Standardwert nur zurückgibt wenn
+    die Variable fehlt. GitHub Actions setzt nicht definierte Variablen aber
+    als Leerstring – damit wäre der Standardwert ausgehebelt.
+    """
+    return os.getenv(name, "").strip() or default
+
 
 def _provider_order_from_env() -> list[str]:
     """
@@ -211,14 +225,14 @@ class RapidApiConfig:
     Registrierung: https://rapidapi.com → Sky Scrapper abonnieren (Free-Tier).
     """
 
-    api_key: str = field(default_factory=lambda: os.getenv("RAPIDAPI_KEY", ""))
+    api_key: str = field(default_factory=lambda: os.getenv("RAPIDAPI_KEY", "").strip())
     host: str = field(
-        default_factory=lambda: os.getenv("RAPIDAPI_HOST", "sky-scrapper.p.rapidapi.com")
+        default_factory=lambda: _env_or_default("RAPIDAPI_HOST", DEFAULT_RAPIDAPI_HOST)
     )
 
     def is_configured(self) -> bool:
-        """Prüft ob API-Key gesetzt ist."""
-        return bool(self.api_key)
+        """Prüft ob Key und Host gesetzt sind."""
+        return bool(self.api_key and self.host)
 
 
 @dataclass

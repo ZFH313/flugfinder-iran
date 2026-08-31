@@ -1,22 +1,31 @@
-name: Daily Flight Search
+name: Flight Search
+
+# Dateiname bleibt daily_search.yml, weil die PWA diesen Workflow
+# über die GitHub-API startet (frontend/app.js).
 
 on:
   schedule:
-    # Jeden Tag um 6:00 Uhr UTC (= 8:00 Uhr deutscher Zeit im Sommer)
-    - cron: '0 6 * * *'
-  
-  # Manuell auslösbar mit optionalem Datum-Parameter
+    # Montag: nur Teheran (4 Abflughäfen × 1 Ziel × 3 Termine = 12 Anfragen)
+    - cron: '0 6 * * 1'
+    # Donnerstag: zusätzlich Mashhad (4 × 2 × 3 = 24 Anfragen)
+    - cron: '0 6 * * 4'
+
   workflow_dispatch:
     inputs:
       dates:
         description: 'Manuelle Reisedaten (Format: YYYY-MM-DD:YYYY-MM-DD)'
         required: false
         type: string
+      all_destinations:
+        description: 'Auch Mashhad durchsuchen (verdoppelt die API-Anfragen)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   search:
     runs-on: ubuntu-latest
-    
+
     permissions:
       contents: write
 
@@ -33,19 +42,35 @@ jobs:
       - name: Dependencies installieren
         run: pip install -r requirements.txt
 
-      - name: Flugsuche starten (automatisch)
-        if: ${{ github.event.inputs.dates == '' }}
-        run: python main.py --verbose
+      - name: Suchmodus bestimmen
+        id: mode
         env:
-          SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_ALL_DEST: ${{ github.event.inputs.all_destinations }}
+          INPUT_DATES: ${{ github.event.inputs.dates }}
+        run: |
+          ARGS="--verbose"
 
-      - name: Flugsuche starten (manuelles Datum)
-        if: ${{ github.event.inputs.dates != '' }}
-        run: python main.py --dates "${{ github.event.inputs.dates }}" --verbose
+          # Donnerstags-Lauf oder manuell angefordert → auch Mashhad
+          if [ "$SCHEDULE" = "0 6 * * 4" ] || [ "$INPUT_ALL_DEST" = "true" ]; then
+            ARGS="$ARGS --all-destinations"
+            echo "Ziele: Teheran + Mashhad"
+          else
+            echo "Ziele: nur Teheran"
+          fi
+
+          if [ -n "$INPUT_DATES" ]; then
+            ARGS="$ARGS --dates $INPUT_DATES"
+            echo "Manuelles Datum: $INPUT_DATES"
+          fi
+
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
+      - name: Flugsuche starten
+        run: python main.py ${{ steps.mode.outputs.args }}
         env:
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
@@ -53,6 +78,6 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add frontend/data.json results/ data/price_history.json
-          git diff --staged --quiet || git commit -m "🛫 Flugsuch-Ergebnisse $(date +'%Y-%m-%d %H:%M')"
+          git add frontend/data.json results/ data/price_history.json data/airport_ids.json
+          git diff --staged --quiet || git commit -m "Flugsuch-Ergebnisse $(date +'%Y-%m-%d %H:%M')"
           git push

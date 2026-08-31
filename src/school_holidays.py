@@ -141,122 +141,171 @@ def load_holidays(holidays_file: str | None = None) -> list[HolidayPeriod]:
     return holidays
 
 
-def save_holidays(holidays: list[HolidayPeriod], holidays_file: str) -> None:
-    """Speichert Feriendaten in JSON-Datei."""
-    data = [
-        {
-            "name": h.name,
-            "start": h.start.isoformat(),
-            "end": h.end.isoformat(),
-            "state": h.state,
-        }
-        for h in holidays
-    ]
-
-    file_path = Path(holidays_file)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-    logger.info(f"Feriendaten gespeichert: {holidays_file}")
-
-
-def get_next_holiday(
-    holidays: list[HolidayPeriod],
-    reference_date: date | None = None,
-    min_duration_days: int = 3,
-) -> HolidayPeriod | None:
-    """
-    Findet die nächste anstehende Ferienperiode.
-
-    Args:
-        holidays: Alle Ferienperioden
-        reference_date: Ab welchem Datum suchen (default: heute)
-        min_duration_days: Mindestdauer der Ferien (kurze Ferien wie 1-2 Tage überspringen)
-
-    Returns:
-        Nächste Ferienperiode oder None
-    """
-    ref = reference_date or date.today()
-
-    upcoming = [
-        h for h in holidays
-        if h.start > ref and h.duration_days >= min_duration_days
-    ]
-
-    if not upcoming:
-        logger.warning("Keine anstehenden Ferien gefunden")
-        return None
-
-    # Sortiere nach Startdatum, nimm die nächste
-    upcoming.sort(key=lambda h: h.start)
-    next_holiday = upcoming[0]
-
-    logger.info(f"Nächste Ferien: {next_holiday.name} ({next_holiday.start} – {next_holiday.end})")
-    return next_holiday
-
-
 def get_all_upcoming_holidays(
     holidays: list[HolidayPeriod],
     reference_date: date | None = None,
     min_duration_days: int = 3,
 ) -> list[HolidayPeriod]:
-    """Gibt alle zukünftigen Ferienperioden zurück (sortiert)."""
+    """
+    Gibt alle zukünftigen UND aktuell laufenden Ferienperioden zurück (sortiert).
+
+    Eine Ferienperiode gilt als relevant wenn:
+    - Sie noch nicht vorbei ist (end >= heute)
+    - Sie mindestens min_duration_days lang ist
+    """
     ref = reference_date or date.today()
 
     upcoming = [
         h for h in holidays
-        if h.start > ref and h.duration_days >= min_duration_days
+        if h.end >= ref and h.duration_days >= min_duration_days
     ]
     upcoming.sort(key=lambda h: h.start)
 
+    logger.info(f"{len(upcoming)} relevante Ferienperioden gefunden (inkl. laufende)")
+    for h in upcoming:
+        status = "AKTIV" if h.start <= ref <= h.end else "kommend"
+        logger.info(f"  [{status}] {h.name}: {h.start} – {h.end} ({h.duration_days} Tage)")
+
     return upcoming
+
+
+def extend_with_weekends(holiday: HolidayPeriod) -> tuple[date, date]:
+    """
+    Erweitert eine Ferienperiode um angrenzende Wochenenden.
+
+    Logik:
+    - Wenn Ferien am Montag/Dienstag starten → Freitag davor als frühesten Hinflug nutzen
+    - Wenn Ferien am Donnerstag/Freitag enden → Sonntag danach als spätesten Rückflug nutzen
+
+    Das ermöglicht längeren Urlaub wenn ein Wochenende direkt an die Ferien grenzt.
+
+    Args:
+        holiday: Die Ferienperiode
+
+    Returns:
+        (erweiterter_start, erweitertes_ende) – die erweiterten Reisedaten
+    """
+    extended_start = holiday.start
+    extended_end = holiday.end
+
+    # Wochentag: 0=Montag, 1=Dienstag, ..., 4=Freitag, 5=Samstag, 6=Sonntag
+    start_weekday = holiday.start.weekday()
+    end_weekday = holiday.end.weekday()
+
+    # Wenn Ferien am Montag starten → Freitag davor dazunehmen (3 Tage zurück)
+    if start_weekday == 0:  # Montag
+        extended_start = holiday.start - timedelta(days=3)
+        logger.debug(f"  Wochenend-Erweiterung: Start Fr {extended_start} (statt Mo {holiday.start})")
+    # Wenn Ferien am Dienstag starten → Samstag davor (3 Tage zurück)
+    elif start_weekday == 1:  # Dienstag
+        extended_start = holiday.start - timedelta(days=3)
+        logger.debug(f"  Wochenend-Erweiterung: Start Sa {extended_start} (statt Di {holiday.start})")
+
+    # Wenn Ferien am Donnerstag enden → Sonntag danach (3 Tage vorwärts)
+    if end_weekday == 3:  # Donnerstag
+        extended_end = holiday.end + timedelta(days=3)
+        logger.debug(f"  Wochenend-Erweiterung: Ende So {extended_end} (statt Do {holiday.end})")
+    # Wenn Ferien am Freitag enden → Sonntag danach (2 Tage vorwärts)
+    elif end_weekday == 4:  # Freitag
+        extended_end = holiday.end + timedelta(days=2)
+        logger.debug(f"  Wochenend-Erweiterung: Ende So {extended_end} (statt Fr {holiday.end})")
+
+    return extended_start, extended_end
 
 
 def calculate_travel_dates(
     holiday: HolidayPeriod,
     flexibility_days: int = 2,
+    reference_date: date | None = None,
 ) -> list[tuple[date, date]]:
     """
     Berechnet alle möglichen Reisedaten basierend auf einer Ferienperiode mit Flexibilität.
 
-    Hinflug: Ferienstart ± flexibility_days
-    Rückflug: Ferienende ± flexibility_days
+    Berücksichtigt Wochenend-Erweiterung: Wenn ein Wochenende direkt an die Ferien grenzt,
+    wird es in den möglichen Reisezeitraum einbezogen.
+
+    Hinflug: Erweiterter Ferienstart ± flexibility_days (aber nicht in der Vergangenheit)
+    Rückflug: Erweitertes Ferienende ± flexibility_days (aber nicht in der Vergangenheit)
 
     Args:
         holiday: Die Ferienperiode
         flexibility_days: ±Tage Flexibilität
+        reference_date: Referenzdatum (default: heute)
 
     Returns:
         Liste von (Hinflug-Datum, Rückflug-Datum) Kombinationen
     """
+    ref = reference_date or date.today()
+    # Frühestes mögliches Hinflugdatum ist morgen (kann heute nicht mehr buchen/fliegen)
+    earliest_possible = ref + timedelta(days=1)
+
+    # Wochenend-Erweiterung anwenden
+    extended_start, extended_end = extend_with_weekends(holiday)
+
     travel_dates = []
 
-    # Alle möglichen Hinflug-Tage
-    outbound_dates = [
-        holiday.start + timedelta(days=d)
-        for d in range(-flexibility_days, flexibility_days + 1)
-    ]
+    # Strategie: Bei langen Ferien (>21 Tage) mehrere 2-Wochen-Fenster erzeugen
+    # Bei kurzen Ferien: nur ein Fenster (ganzer Zeitraum)
+    holiday_duration = (extended_end - extended_start).days
 
-    # Alle möglichen Rückflug-Tage
-    return_dates = [
-        holiday.end + timedelta(days=d)
-        for d in range(-flexibility_days, flexibility_days + 1)
-    ]
+    if holiday_duration > 21:
+        # Lange Ferien (Sommer): 3 Zeitfenster à 21 Tage (3 Wochen Aufenthalt)
+        windows = [
+            (extended_start, extended_start + timedelta(days=21)),
+            (extended_start + timedelta(days=int(holiday_duration / 2) - 10),
+             extended_start + timedelta(days=int(holiday_duration / 2) + 11)),
+            (extended_end - timedelta(days=21), extended_end),
+        ]
+    else:
+        # Kurze Ferien: ganzer Zeitraum als ein Fenster
+        windows = [(extended_start, extended_end)]
 
-    # Alle gültigen Kombinationen (Rückflug muss nach Hinflug sein, min. 3 Tage)
-    for out_date in outbound_dates:
-        for ret_date in return_dates:
-            if (ret_date - out_date).days >= 3:
-                travel_dates.append((out_date, ret_date))
+    # Flexibilität hinzufügen und filtern
+    for window_start, window_end in windows:
+        outbound_dates = [
+            window_start + timedelta(days=d)
+            for d in range(-flexibility_days, flexibility_days + 1)
+        ]
+        return_dates = [
+            window_end + timedelta(days=d)
+            for d in range(-flexibility_days, flexibility_days + 1)
+        ]
 
-    logger.info(
-        f"Reisedaten berechnet für {holiday.name}: "
-        f"{len(travel_dates)} Kombinationen "
-        f"(Hin: {outbound_dates[0]} – {outbound_dates[-1]}, "
-        f"Rück: {return_dates[0]} – {return_dates[-1]})"
-    )
+        # Vergangene Daten rausfiltern
+        outbound_dates = [d for d in outbound_dates if d >= earliest_possible]
+        return_dates = [d for d in return_dates if d >= earliest_possible]
+
+        if not outbound_dates or not return_dates:
+            continue
+
+        # Gültige Kombinationen (min. 7 Tage)
+        for out_date in outbound_dates:
+            for ret_date in return_dates:
+                if (ret_date - out_date).days >= 7:
+                    travel_dates.append((out_date, ret_date))
+
+    # Duplikate entfernen
+    travel_dates = list(set(travel_dates))
+    travel_dates.sort()
+
+    if not travel_dates:
+        logger.warning(f"Keine gültigen Reisedaten für {holiday.name} (alle in der Vergangenheit)")
+        return []
+
+    if extended_start != holiday.start or extended_end != holiday.end:
+        logger.info(
+            f"Reisedaten berechnet für {holiday.name} (mit WE-Erweiterung): "
+            f"{len(travel_dates)} Kombinationen "
+            f"(Hin: {outbound_dates[0]} – {outbound_dates[-1]}, "
+            f"Rück: {return_dates[0]} – {return_dates[-1]})"
+        )
+    else:
+        logger.info(
+            f"Reisedaten berechnet für {holiday.name}: "
+            f"{len(travel_dates)} Kombinationen "
+            f"(Hin: {outbound_dates[0]} – {outbound_dates[-1]}, "
+            f"Rück: {return_dates[0]} – {return_dates[-1]})"
+        )
 
     return travel_dates
 

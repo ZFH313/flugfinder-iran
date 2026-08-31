@@ -14,8 +14,8 @@ from pathlib import Path
 
 from .combo_search import search_combo_tickets
 from .config import AppConfig, load_config
-from .flight_search import SerpApiClient, search_all_routes
-from .models import LuggageType, SearchResult
+from .flight_search import FlightSearchClient, search_all_routes
+from .models import SearchResult
 from .notifier import (
     TelegramNotifier,
     send_cheap_alert,
@@ -33,7 +33,8 @@ from .price_analyzer import (
 from .price_predictor import predict_all_routes
 from .school_holidays import (
     calculate_travel_dates,
-    get_next_holiday,
+    get_all_upcoming_holidays,
+    is_weekend_departure,
     load_holidays,
 )
 
@@ -46,7 +47,108 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None = None) -> SearchResult:
+def _collect_usable_holidays(config: AppConfig) -> list[dict]:
+    """
+    Sammelt die nächsten Ferienzeiten die tatsächlich buchbare Termine liefern.
+
+    Erst werden für alle Kandidaten die Termine berechnet, dann ausgewählt.
+    Eine bereits laufende Ferienzeit deren Ende zu nah ist liefert keine
+    Termine mehr (Mindestaufenthalt passt nicht mehr rein) und darf keinen
+    der begrenzten Slots belegen.
+
+    Returns:
+        Liste von {"holiday": HolidayPeriod, "dates": [(hin, rück), ...]}
+    """
+    holidays = load_holidays(config.paths.holidays_file)
+    candidates = get_all_upcoming_holidays(holidays, min_duration_days=3)
+
+    if not candidates:
+        logger.error("Keine anstehenden Ferien gefunden!")
+        return []
+
+    usable: list[dict] = []
+    for holiday in candidates:
+        dates = calculate_travel_dates(
+            holiday,
+            flexibility_days=config.flight.flexibility_days,
+        )
+        if dates:
+            usable.append({"holiday": holiday, "dates": dates})
+        else:
+            logger.info(
+                f"Ferienzeit übersprungen: {holiday.name} "
+                f"(endet {holiday.end}, kein Termin mit Mindestaufenthalt möglich)"
+            )
+        if len(usable) >= config.flight.max_holidays_per_run:
+            break
+
+    return usable
+
+
+def _build_search_plan(
+    travel_dates: list[tuple[date, date]],
+    holidays_info: list,
+    flight_config,
+) -> list[tuple[date, date]]:
+    """
+    Wählt aus allen möglichen Datumspaaren die aus, die ins Anfrage-Budget passen.
+
+    Strategie: pro Runde ein Datumspaar je Ferienperiode nehmen (Round-Robin).
+    So bekommt jede Ferienzeit mindestens einen Treffer, bevor eine einzelne
+    Periode mehrere Varianten belegt.
+
+    Args:
+        travel_dates: Alle berechneten Datumspaare
+        holidays_info: Liste von {holiday, dates} (leer bei manueller Suche)
+        flight_config: Flug-Konfiguration mit den Budget-Grenzen
+
+    Returns:
+        Die tatsächlich zu durchsuchenden Datumspaare
+    """
+    budget_limit = flight_config.max_date_pairs_total
+
+    if not holidays_info:
+        # Manuelle Suche: einfach die ersten Paare nehmen
+        selected = sorted(travel_dates)[:budget_limit]
+        logger.info(
+            f"Suchplan (manuell): {len(selected)} von {len(travel_dates)} Datumspaaren"
+        )
+        return selected
+
+    # Kandidaten je Ferienperiode, bevorzugt Wochenend-Flüge
+    per_holiday: list[list[tuple[date, date]]] = []
+    for info in holidays_info:
+        dates = sorted(info["dates"])
+        if not dates:
+            continue
+        dates.sort(key=lambda pair: (not is_weekend_departure(pair[0], pair[1]), pair[0]))
+        per_holiday.append(dates[: flight_config.max_date_pairs_per_holiday])
+
+    # Round-Robin über die Ferienperioden
+    selected: list[tuple[date, date]] = []
+    round_index = 0
+    while len(selected) < budget_limit:
+        added_this_round = False
+        for candidates in per_holiday:
+            if round_index < len(candidates) and len(selected) < budget_limit:
+                selected.append(candidates[round_index])
+                added_this_round = True
+        if not added_this_round:
+            break
+        round_index += 1
+
+    logger.info(
+        f"Suchplan: {len(selected)} von {len(travel_dates)} Datumspaaren "
+        f"(Budget erlaubt {budget_limit})"
+    )
+    for outbound, ret in selected:
+        weekend = " [Wochenende]" if is_weekend_departure(outbound, ret) else ""
+        logger.info(f"  {outbound} → {ret} ({(ret - outbound).days} Nächte){weekend}")
+
+    return selected
+
+
+def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None = None) -> tuple[SearchResult, list]:
     """
     Führt die komplette Flugsuche durch.
 
@@ -55,61 +157,84 @@ def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None =
         target_dates: Optionale manuelle Reisedaten. Wenn None, werden Schulferien genutzt.
 
     Returns:
-        Komplettes Suchergebnis
+        Tuple aus (Komplettes Suchergebnis, Liste der Ferien-Infos für Frontend-Gruppierung)
     """
     start_time = time.time()
     result = SearchResult(search_date=datetime.now())
 
     # --- 1. Reisedaten bestimmen ---
+    holidays_info = []  # Liste von {holiday, dates} für Frontend-Gruppierung
+
     if target_dates:
         travel_dates = target_dates
         result.holiday_period = "Manuelle Suche"
         logger.info(f"Manuelle Suche mit {len(travel_dates)} Datums-Kombinationen")
     else:
-        # Schulferien laden
-        holidays = load_holidays(config.paths.holidays_file)
-        next_holiday = get_next_holiday(holidays)
+        usable = _collect_usable_holidays(config)
 
-        if not next_holiday:
-            logger.error("Keine anstehenden Ferien gefunden!")
-            result.errors.append("Keine anstehenden Ferien gefunden")
-            return result
+        if not usable:
+            logger.error("Keine Ferienzeit mit buchbaren Terminen gefunden!")
+            result.errors.append("Keine buchbaren Ferientermine")
+            return result, []
 
-        result.holiday_period = next_holiday.name
-        result.holiday_start = next_holiday.start
-        result.holiday_end = next_holiday.end
+        holidays_info = usable
+        travel_dates = [pair for entry in usable for pair in entry["dates"]]
 
-        # Reisedaten mit Flexibilität berechnen
-        travel_dates = calculate_travel_dates(
-            next_holiday,
-            flexibility_days=config.flight.flexibility_days,
-        )
+        holiday_names = [entry["holiday"].name for entry in usable]
+        result.holiday_period = " | ".join(holiday_names)
+        result.holiday_start = usable[0]["holiday"].start
+        result.holiday_end = usable[-1]["holiday"].end
+
+        logger.info(f"Suche für {len(usable)} Ferienzeiten: {holiday_names}")
+        logger.info(f"Gesamt: {len(travel_dates)} Datums-Kombinationen")
 
     if not travel_dates:
         logger.error("Keine gültigen Reisedaten berechnet!")
         result.errors.append("Keine gültigen Reisedaten")
-        return result
+        return result, holidays_info
 
     # --- 2. Flugsuche ---
+    # Datumspaare aufs Anfrage-Budget eindampfen
+    search_dates = _build_search_plan(travel_dates, holidays_info, config.flight)
+
+    if not search_dates:
+        logger.error("Suchplan ist leer!")
+        result.errors.append("Suchplan leer")
+        return result, holidays_info
+
+    planned_calls = (
+        len(search_dates) * config.flight.num_routes * max(config.flight.luggage_variants, 1)
+    )
+
     logger.info("=" * 60)
     logger.info("FLUGSUCHE STARTEN")
+    logger.info(f"  Ferienzeiten: {result.holiday_period}")
+    logger.info(f"  Provider-Kette: {' → '.join(config.configured_providers) or 'keine'}")
+    logger.info(f"  Datumspaare: {len(search_dates)}")
+    logger.info(f"  Routen pro Datumspaar: {config.flight.num_routes}")
+    logger.info(f"  Geplante API-Anfragen: {planned_calls} (Limit {config.flight.max_api_calls_per_run})")
     logger.info("=" * 60)
 
-    client = SerpApiClient(config.serpapi)
+    client = FlightSearchClient.from_config(config)
+
+    if not client.providers:
+        logger.error("Kein Suchdienst verfügbar – Suche abgebrochen")
+        result.errors.append("Kein Suchdienst konfiguriert")
+        return result, holidays_info
 
     try:
-        flights = search_all_routes(client, config.flight, travel_dates)
+        flights = search_all_routes(client, config.flight, search_dates)
         result.flights = flights
         logger.info(f"Gesamt: {len(flights)} Flüge gefunden")
     except Exception as e:
         logger.error(f"Fehler bei der Flugsuche: {e}")
         result.errors.append(f"Flugsuche fehlgeschlagen: {e}")
-        return result
+        return result, holidays_info
 
     if not flights:
         logger.warning("Keine Flüge gefunden!")
         result.errors.append("Keine Flüge gefunden")
-        return result
+        return result, holidays_info
 
     # --- 3. Preisanalyse ---
     logger.info("Starte Preisanalyse...")
@@ -129,30 +254,36 @@ def run_search(config: AppConfig, target_dates: list[tuple[date, date]] | None =
         result.predictions = predictions
 
     # --- 5. Kombi-Tickets ---
-    if config.flight.enable_combo_tickets and travel_dates:
-        logger.info("Starte Kombi-Ticket Suche...")
-        best_date_pair = travel_dates[len(travel_dates) // 2]
-        try:
-            combos = search_combo_tickets(
-                client=client, flight_config=config.flight,
-                outbound_date=best_date_pair[0], return_date=best_date_pair[1],
-                min_savings=config.flight.combo_min_savings,
-            )
-            result.combo_tickets = combos
-        except Exception as e:
-            logger.error(f"Fehler bei Kombi-Ticket Suche: {e}")
-            result.errors.append(f"Kombi-Suche fehlgeschlagen: {e}")
+    # Nur wenn nach der Hauptsuche noch Budget übrig ist
+    if config.flight.enable_combo_tickets and search_dates:
+        if client.has_capacity():
+            best_date_pair = search_dates[len(search_dates) // 2]
+            try:
+                combos = search_combo_tickets(
+                    client=client, flight_config=config.flight,
+                    outbound_date=best_date_pair[0], return_date=best_date_pair[1],
+                    min_savings=config.flight.combo_min_savings,
+                )
+                result.combo_tickets = combos
+            except Exception as e:
+                logger.error(f"Fehler bei Kombi-Ticket Suche: {e}")
+                result.errors.append(f"Kombi-Suche fehlgeschlagen: {e}")
+        else:
+            logger.info("Kombi-Ticket Suche übersprungen – Anfrage-Budget aufgebraucht")
 
     # --- Fertig ---
     result.duration_seconds = time.time() - start_time
+    result.total_searches = client.calls_used
     logger.info("=" * 60)
     logger.info(f"SUCHE ABGESCHLOSSEN in {result.duration_seconds:.1f}s")
     logger.info(f"  Flüge gefunden: {len(result.flights)}")
     logger.info(f"  Günstig-Alarme: {sum(1 for f in result.flights if f.is_very_cheap)}")
     logger.info(f"  Kombi-Tickets: {len(result.combo_tickets)}")
+    for line in client.stats_summary():
+        logger.info(f"  {line}")
     logger.info("=" * 60)
 
-    return result
+    return result, holidays_info
 
 
 def send_notifications(config: AppConfig, result: SearchResult) -> None:
@@ -177,35 +308,78 @@ def send_notifications(config: AppConfig, result: SearchResult) -> None:
             send_price_graph(notifier, graph_path)
 
 
-def export_for_frontend(config: AppConfig, result: SearchResult) -> None:
-    """Exportiert die Suchergebnisse als JSON für das PWA-Frontend."""
+def export_for_frontend(config: AppConfig, result: SearchResult, holidays_info: list) -> None:
+    """Exportiert die Suchergebnisse als JSON für das PWA-Frontend, gruppiert nach Ferienperiode."""
+
+    def flight_to_dict(f):
+        return {
+            "departure_airport": f.departure_airport,
+            "destination_airport": f.destination_airport,
+            "outbound_date": f.outbound_date.isoformat(),
+            "return_date": f.return_date.isoformat(),
+            "price_total": f.price_total,
+            "price_per_person": f.price_per_person,
+            "luggage": f.luggage_type.value,
+            "airline": f.airline,
+            "stops_outbound": f.stops_outbound,
+            "stops_return": f.stops_return,
+            "duration_outbound_min": f.duration_outbound_minutes,
+            "duration_return_min": f.duration_return_minutes,
+            "is_very_cheap": f.is_very_cheap,
+            "savings_percent": f.savings_percent,
+            "is_weekend_flight": f.is_weekend_flight,
+            "booking_link": f.booking_link,
+            "source": f.source,
+        }
+
+    # Flüge nach Ferienperiode gruppieren
+    holidays_data = []
+    if holidays_info:
+        for info in holidays_info:
+            holiday = info["holiday"]
+            dates_set = set(info["dates"])
+
+            # Wochenend-Erweiterung berechnen für Frontend-Anzeige
+            from .school_holidays import extend_with_weekends
+            ext_start, ext_end = extend_with_weekends(holiday)
+
+            # Flüge zuordnen: Hinflug-Datum muss in den Daten dieser Ferienperiode liegen
+            holiday_flights = [
+                f for f in result.flights
+                if (f.outbound_date, f.return_date) in dates_set
+            ]
+            holiday_flights.sort(key=lambda f: f.price_total)
+
+            holiday_entry = {
+                "name": holiday.name,
+                "start": holiday.start.isoformat(),
+                "end": holiday.end.isoformat(),
+                "flights": [flight_to_dict(f) for f in holiday_flights[:20]],
+            }
+            # Nur anzeigen wenn tatsächlich erweitert
+            if ext_start != holiday.start or ext_end != holiday.end:
+                holiday_entry["extended_start"] = ext_start.isoformat()
+                holiday_entry["extended_end"] = ext_end.isoformat()
+
+            holidays_data.append(holiday_entry)
+    else:
+        # Manuelle Suche oder Fallback: alle Flüge in eine Gruppe
+        top_flights = sorted(result.flights, key=lambda f: f.price_total)[:20]
+        holidays_data.append({
+            "name": result.holiday_period or "Suchergebnisse",
+            "start": result.holiday_start.isoformat() if result.holiday_start else None,
+            "end": result.holiday_end.isoformat() if result.holiday_end else None,
+            "flights": [flight_to_dict(f) for f in top_flights],
+        })
+
+    # Auch eine flache Liste für Rückwärtskompatibilität
     top_flights = sorted(result.flights, key=lambda f: f.price_total)[:20]
 
     frontend_data = {
         "last_updated": result.search_date.isoformat(),
         "holiday_period": result.holiday_period,
-        "holiday_start": result.holiday_start.isoformat() if result.holiday_start else None,
-        "holiday_end": result.holiday_end.isoformat() if result.holiday_end else None,
-        "flights": [
-            {
-                "departure_airport": f.departure_airport,
-                "destination_airport": f.destination_airport,
-                "outbound_date": f.outbound_date.isoformat(),
-                "return_date": f.return_date.isoformat(),
-                "price_total": f.price_total,
-                "price_per_person": f.price_per_person,
-                "luggage": f.luggage_type.value,
-                "airline": f.airline,
-                "stops_outbound": f.stops_outbound,
-                "stops_return": f.stops_return,
-                "duration_outbound_min": f.duration_outbound_minutes,
-                "duration_return_min": f.duration_return_minutes,
-                "is_very_cheap": f.is_very_cheap,
-                "savings_percent": f.savings_percent,
-                "is_weekend_flight": f.is_weekend_flight,
-            }
-            for f in top_flights
-        ],
+        "holidays": holidays_data,
+        "flights": [flight_to_dict(f) for f in top_flights],
         "combo_tickets": [
             {
                 "departure_airport": c.departure_airport,
@@ -245,6 +419,10 @@ def export_for_frontend(config: AppConfig, result: SearchResult) -> None:
             "cheapest_airport": top_flights[0].departure_airport if top_flights else None,
             "has_alert": result.has_alert,
             "errors": result.errors,
+            "passengers": {
+                "adults": config.flight.adults,
+                "children_ages": list(config.flight.children_ages),
+            },
         },
     }
 
@@ -287,12 +465,80 @@ def parse_manual_dates(date_str: str) -> list[tuple[date, date]] | None:
         return None
 
 
+def _run_dry_run(config: AppConfig, target_dates: list[tuple[date, date]] | None = None) -> None:
+    """
+    Dry-Run: Zeigt an welche Ferien und Daten durchsucht würden, ohne API-Aufrufe.
+    Nützlich um die Pipeline-Logik zu verifizieren.
+    """
+    logger.info("=" * 60)
+    logger.info("DRY RUN – Keine API-Anfragen werden gesendet")
+    logger.info("=" * 60)
+
+    holidays_info: list = []
+
+    if target_dates:
+        travel_dates = target_dates
+        logger.info(f"Manuelle Suche mit {len(travel_dates)} Datumskombinationen")
+    else:
+        holidays_info = _collect_usable_holidays(config)
+        if not holidays_info:
+            logger.error("Keine Ferienzeit mit buchbaren Terminen gefunden!")
+            return
+        travel_dates = [pair for entry in holidays_info for pair in entry["dates"]]
+
+    if not travel_dates:
+        logger.error("Keine gültigen Reisedaten berechnet!")
+        return
+
+    # Suchplan wie im Echtlauf berechnen
+    search_dates = _build_search_plan(travel_dates, holidays_info, config.flight)
+
+    planned_calls = (
+        len(search_dates) * config.flight.num_routes * max(config.flight.luggage_variants, 1)
+    )
+
+    logger.info("")
+    logger.info("ZUSAMMENFASSUNG:")
+    logger.info(f"  Provider-Kette: {' → '.join(config.configured_providers) or 'keine konfiguriert'}")
+    logger.info(f"  Mögliche Datumspaare: {len(travel_dates)}")
+    logger.info(f"  Davon im Suchplan: {len(search_dates)}")
+    logger.info(f"  Abflughäfen: {config.flight.departure_airports}")
+    logger.info(f"  Zielflughäfen: {config.flight.destination_airports}")
+    logger.info(f"  Routen pro Datumspaar: {config.flight.num_routes}")
+    logger.info(f"  Gepäck-Varianten: {max(config.flight.luggage_variants, 1)}")
+    logger.info(f"  Geplante API-Anfragen: {planned_calls}")
+    logger.info(f"  Budget-Limit: {config.flight.max_api_calls_per_run}")
+    logger.info(f"  Geschätzte Dauer: ~{planned_calls * 0.5 / 60:.1f} Minuten")
+    logger.info("")
+
+    if search_dates:
+        dates_sorted = sorted(search_dates)
+        logger.info(f"  Frühester Hinflug: {dates_sorted[0][0]}")
+        logger.info(f"  Spätester Rückflug: {dates_sorted[-1][1]}")
+        logger.info("")
+
+        logger.info("BEISPIEL-SUCHEN (erste 5):")
+        for out_date, ret_date in dates_sorted[:5]:
+            dep = config.flight.departure_airports[0]
+            dest = config.flight.destination_airports[0]
+            logger.info(f"  {dep} → {dest}: {out_date} – {ret_date}")
+
+    logger.info("")
+    logger.info("✓ Dry-Run abgeschlossen. Starte ohne --dry-run für echte Suche.")
+
+
 def main():
     """Entry Point der Anwendung."""
     parser = argparse.ArgumentParser(description="FlugFinder Iran – Günstige Flüge nach Iran finden")
     parser.add_argument("--dates", type=str, help="Manuelle Reisedaten (Format: YYYY-MM-DD:YYYY-MM-DD)")
     parser.add_argument("--no-notify", action="store_true", help="Keine Telegram-Benachrichtigungen")
     parser.add_argument("--no-frontend", action="store_true", help="Keine Frontend-Daten exportieren")
+    parser.add_argument("--dry-run", action="store_true", help="Nur Ferien und Daten anzeigen, keine API-Anfragen")
+    parser.add_argument(
+        "--all-destinations",
+        action="store_true",
+        help="Auch die sekundären Ziele (Mashhad) durchsuchen – verdoppelt die API-Anfragen",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="DEBUG Log-Level")
 
     args = parser.parse_args()
@@ -302,12 +548,10 @@ def main():
 
     logger.info("🛫 FlugFinder Iran gestartet")
 
-    # Konfiguration laden
-    config = load_config()
-
-    if not config.serpapi.is_configured():
-        logger.error("SerpApi API Key nicht konfiguriert! Bitte SERPAPI_API_KEY in .env setzen.")
-        sys.exit(1)
+    # Konfiguration laden – Ziel-Rotation vor dem Logging setzen
+    config = AppConfig()
+    config.flight.include_secondary_destinations = args.all_destinations
+    config = load_config(config)
 
     # Manuelle Daten?
     target_dates = None
@@ -317,8 +561,19 @@ def main():
             logger.error("Konnte Daten nicht parsen. Format: YYYY-MM-DD:YYYY-MM-DD")
             sys.exit(1)
 
+    # Dry-Run: nur Ferien + Daten anzeigen, keine API-Calls
+    if args.dry_run:
+        _run_dry_run(config, target_dates)
+        return
+
+    if not config.has_any_provider():
+        logger.error(
+            "Kein Suchdienst konfiguriert! Setze SERPAPI_API_KEY und/oder RAPIDAPI_KEY in .env."
+        )
+        sys.exit(1)
+
     # Suche durchführen
-    result = run_search(config, target_dates)
+    result, holidays_info = run_search(config, target_dates)
 
     # Benachrichtigungen
     if not args.no_notify:
@@ -326,7 +581,7 @@ def main():
 
     # Frontend-Daten
     if not args.no_frontend:
-        export_for_frontend(config, result)
+        export_for_frontend(config, result, holidays_info)
 
     if result.errors and not result.flights:
         sys.exit(1)

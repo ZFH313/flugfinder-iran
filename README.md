@@ -1,27 +1,33 @@
 # ✈️ FlugFinder Iran
 
-Automatische Suche nach den günstigsten Flügen von Deutschland nach Iran. Läuft täglich über GitHub Actions und benachrichtigt dich per Telegram wenn besonders günstige Flüge gefunden werden.
+Automatische Suche nach den günstigsten Flügen von Deutschland nach Iran. Läuft zweimal pro Woche über GitHub Actions und benachrichtigt dich per Telegram wenn besonders günstige Flüge gefunden werden.
 
 ## Features
 
-- 🔍 **Tägliche Suche** – 4 Abflughäfen × 2 Zielflughäfen × alle Datumskombinationen
-- 🏖 **Schulferien** – Automatisch die nächsten Niedersachsen-Ferien mit ±2 Tagen Flexibilität
+- 🔍 **Suche Mo + Do** – 4 Abflughäfen, Ziel-Rotation, 3 Ferienzeiten
+- 🏖 **Schulferien** – Nächste Niedersachsen-Ferien, inklusive angrenzender Wochenenden
+- 🔁 **Zwei Suchdienste** – SerpApi zuerst, bei Kontingent-Ende automatisch Sky Scrapper
 - 💰 **Günstig-Alarm** – Telegram-Benachrichtigung bei Preisen unter Durchschnitt
-- 📈 **Preis-Trend** – Wöchentlicher Verlauf als Graph
-- 🔮 **Vorhersage** – "Jetzt buchen" oder "Noch warten" basierend auf ML
-- 🔀 **Kombi-Tickets** – Hin ab Hamburg, Rück nach Frankfurt wenn günstiger
+- 📈 **Preis-Trend** – Verlauf als Balken in der App
+- 🔮 **Vorhersage** – "Jetzt buchen" oder "Noch warten" auf Basis der Preishistorie
 - 📱 **PWA-App** – Installierbar auf iPhone/Android (kein App Store nötig)
 
 ## Routen
 
-| Abflug | Ziel |
-|--------|------|
-| Hannover (HAJ) | Teheran IKA |
-| Berlin (BER) | Mashhad (MHD) |
-| Hamburg (HAM) | |
-| Frankfurt (FRA) | |
+**Abflughäfen:** Hannover (HAJ), Berlin (BER), Hamburg (HAM), Frankfurt (FRA)
+
+**Ziele mit Rotation:**
+
+| Lauf | Ziele | API-Anfragen |
+|------|-------|--------------|
+| Montag | Teheran (IKA) | 12 |
+| Donnerstag | Teheran (IKA) + Mashhad (MHD) | 24 |
+
+Mashhad wird nur einmal pro Woche mitgesucht, weil jedes zusätzliche Ziel den Verbrauch verdoppelt.
 
 **Reisende:** 2 Erwachsene + 2 Kinder
+
+**Aufenthalt:** mindestens 7 Nächte, in den Sommerferien 3 Wochen
 
 ## Setup
 
@@ -48,14 +54,25 @@ cp .env.example .env
 # .env bearbeiten und API-Keys einfügen
 ```
 
-### 4. Amadeus API Key holen
+### 4. Suchdienste einrichten
 
-1. Gehe zu [developers.amadeus.com/register](https://developers.amadeus.com/register)
-2. Account erstellen (kostenlos)
-3. Unter "My Self-Service Workspace" → "Create new app"
-4. **API Key** und **API Secret** kopieren → in `.env` eintragen
+Die App nutzt eine Kette aus zwei Diensten. Es genügt wenn einer eingerichtet ist, mit beiden bist du gegen Kontingent-Ende gewappnet.
 
-> Der Self-Service (Test) Tier ist kostenlos und reicht für tägliche Suchen.
+**SerpApi (primär)**
+
+1. Registrieren: [serpapi.com/users/sign_up](https://serpapi.com/users/sign_up)
+2. Key kopieren von [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key)
+3. In `.env` als `SERPAPI_API_KEY` eintragen
+
+> Kostenlos sind 100 Suchen pro Monat.
+
+**Sky Scrapper über RapidAPI (Fallback)**
+
+1. Account anlegen: [rapidapi.com](https://rapidapi.com)
+2. Sky Scrapper suchen und den kostenlosen Plan abonnieren
+3. Den `x-rapidapi-key` kopieren → in `.env` als `RAPIDAPI_KEY`
+
+> Kiwi Tequila und Amadeus Self-Service stehen nicht mehr zur Verfügung: Kiwi hat den Self-Service-Zugang 2024 geschlossen, Amadeus wurde im Juli 2026 abgeschaltet.
 
 ### 5. Telegram Bot einrichten
 
@@ -69,8 +86,14 @@ cp .env.example .env
 ### 6. Lokal testen
 
 ```bash
-# Automatische Suche (nächste Ferien)
+# Suchplan und Budget prüfen, OHNE API-Anfragen (kostet nichts)
+python main.py --dry-run --verbose
+
+# Normale Suche (nur Teheran)
 python main.py
+
+# Suche inklusive Mashhad
+python main.py --all-destinations
 
 # Manuelle Suche mit bestimmtem Datum
 python main.py --dates 2026-12-23:2027-01-06
@@ -82,18 +105,20 @@ python main.py --no-notify
 python main.py --verbose
 ```
 
+> Starte immer erst mit `--dry-run`. Damit siehst du welche Ferienzeiten und Termine gesucht würden und wie viele Anfragen das kostet, ohne Kontingent zu verbrauchen.
+
 ## GitHub Actions einrichten
 
 ### Secrets konfigurieren
 
 In deinem GitHub Repository unter **Settings → Secrets and variables → Actions**:
 
-| Secret | Wert |
-|--------|------|
-| `AMADEUS_API_KEY` | Dein Amadeus API Key |
-| `AMADEUS_API_SECRET` | Dein Amadeus API Secret |
-| `TELEGRAM_BOT_TOKEN` | Dein Telegram Bot Token |
-| `TELEGRAM_CHAT_ID` | Deine Telegram Chat ID |
+| Secret | Wert | Pflicht |
+|--------|------|---------|
+| `SERPAPI_API_KEY` | Dein SerpApi Key | ja |
+| `RAPIDAPI_KEY` | Dein RapidAPI Key für Sky Scrapper | empfohlen |
+| `TELEGRAM_BOT_TOKEN` | Dein Telegram Bot Token | für Benachrichtigungen |
+| `TELEGRAM_CHAT_ID` | Deine Telegram Chat ID | für Benachrichtigungen |
 
 ### GitHub Pages aktivieren
 
@@ -101,14 +126,19 @@ In deinem GitHub Repository unter **Settings → Secrets and variables → Actio
 2. Source: **GitHub Actions** auswählen
 3. Die PWA ist dann erreichbar unter: `https://DEIN-USERNAME.github.io/flugfinder-iran/`
 
-### Tägliche Suche
+### Automatische Suche
 
-Die Suche läuft automatisch jeden Tag um 8:00 Uhr (deutscher Zeit).
+Die Suche läuft zweimal pro Woche um 8:00 Uhr deutscher Zeit:
+
+- **Montag** – nur Teheran (12 Anfragen)
+- **Donnerstag** – Teheran und Mashhad (24 Anfragen)
 
 **Manuelle Suche starten:**
-1. **Actions** Tab → "Daily Flight Search"
+1. **Actions** Tab → "Flight Search"
 2. **Run workflow** klicken
-3. Optional: Datum eingeben (Format: `2026-12-23:2027-01-06`)
+3. Optional: Datum eingeben (`2026-12-23:2027-01-06`) und/oder Mashhad dazuschalten
+
+> Jede manuelle Suche kostet ein volles Anfrage-Paket. Bei 100 kostenlosen SerpApi-Anfragen pro Monat sind das etwa 4 zusätzliche Suchen, bevor der Fallback greift.
 
 ## PWA auf dem Handy installieren
 
@@ -130,8 +160,9 @@ flugfinder-iran/
 ├── src/
 │   ├── config.py                # Alle Einstellungen
 │   ├── models.py                # Pydantic Datenmodelle
-│   ├── school_holidays.py       # Schulferien + Flexibilität
-│   ├── flight_search.py         # Amadeus API Client
+│   ├── school_holidays.py       # Schulferien + Wochenend-Erweiterung
+│   ├── flight_providers.py      # SerpApi + Sky Scrapper Provider
+│   ├── flight_search.py         # Orchestrator mit Fallback + Budget
 │   ├── price_analyzer.py        # Preisvergleich & Trends
 │   ├── price_predictor.py       # ML Vorhersage
 │   ├── combo_search.py          # Kombi-Tickets
@@ -151,7 +182,7 @@ flugfinder-iran/
 ├── results/
 │   └── latest_results.json
 ├── .github/workflows/
-│   ├── daily_search.yml         # Tägliche Suche
+│   ├── daily_search.yml         # Suche Mo + Do
 │   └── deploy_pages.yml         # GitHub Pages Deploy
 ├── requirements.txt
 ├── .env.example
@@ -164,20 +195,33 @@ Alle Einstellungen in `src/config.py`:
 
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
+| `primary_destinations` | `["IKA"]` | Ziele bei jedem Lauf |
+| `secondary_destinations` | `["MHD"]` | Ziele nur mit `--all-destinations` |
+| `max_api_calls_per_run` | 24 | Harte Obergrenze pro Lauf |
+| `max_holidays_per_run` | 3 | Wie viele Ferienzeiten geprüft werden |
+| `max_date_pairs_per_holiday` | 1 | Termine pro Ferienzeit |
 | `max_stops` | 1 | Maximale Zwischenstopps |
 | `departure_time_preference` | "no_night" | Keine Nachtflüge |
-| `prefer_weekend_departure` | true | Fr/Sa Hinflug bevorzugen |
 | `price_limit_alert` | 1500 | Preislimit für Alarm (€) |
-| `flexibility_days` | 2 | ±Tage Flexibilität |
-| `enable_combo_tickets` | true | Kombi-Tickets suchen |
-| `enable_price_prediction` | true | ML Vorhersage aktiv |
+| `flexibility_days` | 0 | ±Tage Flexibilität um den Termin |
+| `enable_combo_tickets` | false | Kostet ~32 Anfragen, daher aus |
+| `enable_price_prediction` | true | Vorhersage aktiv |
+
+### Verbrauch selbst nachrechnen
+
+```
+Anfragen pro Lauf = Abflughäfen × Ziele × Gepäckvarianten × Termine
+```
+
+Beispiel Donnerstag: 4 × 2 × 1 × 3 = 24. Die Route-Zahl ist der größte Hebel, weil sie jeden Termin multipliziert.
 
 ## Hinweise
 
-- Die Amadeus Test-API liefert manchmal keine Ergebnisse für bestimmte Routen
 - Preise ändern sich ständig – keine Buchungsgarantie
-- Der Preisverlauf wird besser mit mehr Datenpunkten (nach 2+ Wochen)
-- Icons müssen noch als PNG-Dateien erstellt werden (siehe `frontend/icons/`)
+- Der Preisverlauf wird aussagekräftiger mit mehr Datenpunkten (nach 2+ Wochen)
+- Icons müssen noch als PNG erstellt werden (siehe `frontend/generate-icons.html`)
+- Das Sky-Scrapper-Parsing ist nach Dokumentation gebaut, aber noch nicht mit einem echten Key gegengetestet
+- `frontend/data.json` enthält aktuell Demo-Daten, keine echten Preise
 
 ## Icons generieren
 

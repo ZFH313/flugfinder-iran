@@ -73,6 +73,7 @@ class FlightOffer(BaseModel):
     savings_percent: float = Field(default=0.0, description="Ersparnis in % zum Durchschnitt")
     is_weekend_flight: bool = Field(default=False, description="Hinflug Fr/Sa, Rückflug So")
     booking_link: str = Field(default="", description="Link zur Buchung (wenn verfügbar)")
+    source: str = Field(default="", description="Welcher Provider hat den Flug geliefert")
 
     @property
     def total_stops(self) -> int:
@@ -197,26 +198,6 @@ class SearchResult(BaseModel):
     def has_alert(self) -> bool:
         """Gibt es einen Günstig-Alarm?"""
         return any(f.is_very_cheap for f in self.flights)
-
-    def get_flights_by_airport(self, airport: str) -> list[FlightOffer]:
-        """Alle Flüge ab einem bestimmten Flughafen."""
-        return [f for f in self.flights if f.departure_airport == airport]
-
-    def get_matrix(self) -> dict[str, dict[str, FlightOffer | None]]:
-        """
-        Multi-Datum-Matrix: Airport → Datum → günstigstes Angebot.
-        Nützlich für die Übersichts-Tabelle.
-        """
-        matrix: dict[str, dict[str, FlightOffer | None]] = {}
-        for flight in self.flights:
-            airport = flight.departure_airport
-            date_key = flight.outbound_date.isoformat()
-            if airport not in matrix:
-                matrix[airport] = {}
-            existing = matrix[airport].get(date_key)
-            if existing is None or flight.price_total < existing.price_total:
-                matrix[airport][date_key] = flight
-        return matrix
 
 
 # --- Schulferien ---

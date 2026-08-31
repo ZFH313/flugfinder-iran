@@ -3,13 +3,14 @@
  * Ermöglicht Offline-Nutzung und schnellere Ladezeiten.
  */
 
-const CACHE_NAME = "flugfinder-v1";
+const CACHE_NAME = "flugfinder-v2";
 const ASSETS_TO_CACHE = [
-    "/",
-    "/index.html",
-    "/style.css",
-    "/app.js",
-    "/manifest.json",
+    "./",
+    "./index.html",
+    "./style.css",
+    "./app.js",
+    "./manifest.json",
+    "./icons/icon.svg",
 ];
 
 // Installation: Cache alle statischen Assets

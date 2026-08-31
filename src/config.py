@@ -22,21 +22,30 @@ class FlightConfig:
         default_factory=lambda: ["HAJ", "BER", "HAM", "FRA"]
     )
 
-    # Zielflughäfen (IATA-Codes)
-    destination_airports: list[str] = field(
-        default_factory=lambda: ["IKA", "MHD"]
+    # --- Zielflughäfen (IATA-Codes) ---
+    # Ziele werden rotiert um API-Anfragen zu sparen:
+    #   primär   → bei JEDEM Lauf gesucht
+    #   sekundär → nur bei Läufen mit --all-destinations (1× pro Woche)
+    primary_destinations: list[str] = field(
+        default_factory=lambda: ["IKA"]  # Teheran
     )
+    secondary_destinations: list[str] = field(
+        default_factory=lambda: ["MHD"]  # Mashhad
+    )
+
+    # Wird zur Laufzeit gesetzt (CLI-Flag --all-destinations)
+    include_secondary_destinations: bool = False
 
     # Reisende
     adults: int = 2
     children_ages: list[int] = field(default_factory=lambda: [5, 8])
 
-    # Gepäck-Optionen (immer beides suchen)
+    # Gepäck-Optionen (nur MIT Gepäck suchen um API-Calls zu sparen)
     search_with_luggage: bool = True
-    search_without_luggage: bool = True
+    search_without_luggage: bool = False
 
-    # Flexibilität in Tagen (±)
-    flexibility_days: int = 2
+    # Flexibilität in Tagen (±) — 0 = nur exaktes Feriendatum
+    flexibility_days: int = 0
 
     # Zwischenstopp-Filter
     max_stops: int = 1  # 0 = nur direkt, 1 = max 1 Stopp, 2 = max 2 Stopps
@@ -46,11 +55,6 @@ class FlightConfig:
     # Optionen: "morning", "afternoon", "evening", "no_night", "any"
     departure_time_preference: str = "no_night"
 
-    # Wochenend-Präferenz
-    prefer_weekend_departure: bool = True  # Freitag/Samstag Hinflug bevorzugen
-    prefer_weekend_return: bool = True  # Sonntag Rückflug bevorzugen
-    weekend_price_tolerance: int = 100  # Max Aufpreis in € für Wochenend-Option
-
     # Preislimit für Alarm (Gesamtpreis alle Personen in €)
     price_limit_alert: int = 1500
 
@@ -58,12 +62,85 @@ class FlightConfig:
     cheap_threshold_percent: float = 20.0  # "Sehr günstig" wenn X% unter Durchschnitt
 
     # Kombi-Tickets
-    enable_combo_tickets: bool = True
+    # Standardmäßig AUS: die Suche kostet allein ca. 32 API-Anfragen
+    # (8 Routen für Referenzpreise + 24 Kombinationen) und würde das
+    # Budget für die Hauptsuche auffressen. Nur bewusst einschalten und
+    # dann max_api_calls_per_run entsprechend erhöhen.
+    enable_combo_tickets: bool = False
     combo_min_savings: int = 100  # Nur anzeigen wenn >X€ günstiger
 
     # Preis-Vorhersage
     enable_price_prediction: bool = True
     prediction_min_data_days: int = 14  # Mindestens X Tage Daten für Vorhersage
+
+    # --- Provider-Kette ---
+    # Reihenfolge in der die Suchdienste probiert werden. Ist ein Dienst
+    # nicht konfiguriert oder sein Kontingent erschöpft, übernimmt der nächste.
+    # Gültige Werte: "serpapi", "skyscrapper"
+    provider_order: list[str] = field(
+        default_factory=lambda: ["serpapi", "skyscrapper"]
+    )
+
+    # --- API-Budget (SerpApi Free-Tier: 100 Suchen/Monat) ---
+    #
+    # Kosten einer Suche:
+    #   1 Anfrage = 1 Abflughafen → 1 Ziel, 1 Datumspaar, 1 Gepäckvariante
+    #   Routen pro Datumspaar = Abflughäfen × Ziele × Gepäckvarianten
+    #
+    # Aktuelle Belegung mit Ziel-Rotation und 3 Ferienzeiten:
+    #   Teheran-Lauf:  4 Abflughäfen × 1 Ziel × 3 Datumspaare = 12 Anfragen
+    #   Mashhad-Lauf:  4 Abflughäfen × 2 Ziele × 3 Datumspaare = 24 Anfragen
+    #
+    # Das Limit muss den größeren Lauf abdecken → 24.
+    # Der Teheran-Lauf bleibt automatisch bei 12, weil nur 3 Datumspaare
+    # existieren (3 Ferienzeiten × 1 Paar).
+    #
+    # Größter Sparhebel ist die Route-Zahl, weil sie jedes Datumspaar
+    # multipliziert. Ein Ziel weniger halbiert den Verbrauch sofort.
+    max_api_calls_per_run: int = 24
+
+    # Datumspaare pro Ferienperiode. Bei 1 bekommt jede Ferienzeit genau
+    # einen Termin – so deckt das Budget alle Ferien ab, statt dass eine
+    # einzelne Periode mehrere Varianten belegt.
+    max_date_pairs_per_holiday: int = 1
+
+    # Wie viele Ferienperioden maximal durchsuchen.
+    # Gezählt werden nur Perioden die tatsächlich buchbare Termine liefern –
+    # bereits laufende Ferien mit zu wenig Restzeit fallen vorher raus.
+    max_holidays_per_run: int = 3
+
+    @property
+    def destination_airports(self) -> list[str]:
+        """
+        Die in diesem Lauf zu durchsuchenden Ziele.
+
+        Ohne --all-destinations nur die primären Ziele (Teheran),
+        mit Flag zusätzlich die sekundären (Mashhad).
+        """
+        if self.include_secondary_destinations:
+            return [*self.primary_destinations, *self.secondary_destinations]
+        return list(self.primary_destinations)
+
+    @property
+    def num_routes(self) -> int:
+        """Anzahl Routen (Abflughäfen × Zielflughäfen)."""
+        return len(self.departure_airports) * len(self.destination_airports)
+
+    @property
+    def luggage_variants(self) -> int:
+        """Anzahl Gepäck-Varianten die gesucht werden."""
+        return int(self.search_with_luggage) + int(self.search_without_luggage)
+
+    @property
+    def max_date_pairs_total(self) -> int:
+        """
+        Wie viele Datumspaare passen ins API-Budget?
+        Ein Datumspaar kostet num_routes × luggage_variants Anfragen.
+        """
+        cost_per_pair = self.num_routes * max(self.luggage_variants, 1)
+        if cost_per_pair == 0:
+            return 0
+        return max(1, self.max_api_calls_per_run // cost_per_pair)
 
     @property
     def num_children(self) -> int:
@@ -92,9 +169,33 @@ class FlightConfig:
 
 @dataclass
 class SerpApiConfig:
-    """SerpApi Konfiguration (Google Flights)."""
+    """
+    SerpApi Konfiguration (Google Flights).
+
+    Achtung Free-Tier: 100 Suchen pro Monat. Das Budget wird über
+    FlightConfig.max_api_calls_per_run hart begrenzt.
+    """
 
     api_key: str = field(default_factory=lambda: os.getenv("SERPAPI_API_KEY", ""))
+
+    def is_configured(self) -> bool:
+        """Prüft ob API-Key gesetzt ist."""
+        return bool(self.api_key)
+
+
+@dataclass
+class RapidApiConfig:
+    """
+    RapidAPI Konfiguration (Sky Scrapper – Skyscanner-Daten).
+
+    Dient als Fallback wenn das SerpApi-Kontingent erschöpft ist.
+    Registrierung: https://rapidapi.com → Sky Scrapper abonnieren (Free-Tier).
+    """
+
+    api_key: str = field(default_factory=lambda: os.getenv("RAPIDAPI_KEY", ""))
+    host: str = field(
+        default_factory=lambda: os.getenv("RAPIDAPI_HOST", "sky-scrapper.p.rapidapi.com")
+    )
 
     def is_configured(self) -> bool:
         """Prüft ob API-Key gesetzt ist."""
@@ -139,6 +240,11 @@ class PathConfig:
         return os.path.join(self.data_dir, "holidays_niedersachsen.json")
 
     @property
+    def airport_ids_file(self) -> str:
+        """Cache für Sky-Scrapper Flughafen-IDs (skyId/entityId)."""
+        return os.path.join(self.data_dir, "airport_ids.json")
+
+    @property
     def latest_results_file(self) -> str:
         return os.path.join(self.results_dir, "latest_results.json")
 
@@ -154,8 +260,25 @@ class AppConfig:
 
     flight: FlightConfig = field(default_factory=FlightConfig)
     serpapi: SerpApiConfig = field(default_factory=SerpApiConfig)
+    rapidapi: RapidApiConfig = field(default_factory=RapidApiConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     paths: PathConfig = field(default_factory=PathConfig)
+
+    @property
+    def configured_providers(self) -> list[str]:
+        """
+        Gibt die konfigurierten Provider in der gewünschten Reihenfolge zurück.
+        Nicht konfigurierte Dienste werden übersprungen.
+        """
+        available = {
+            "serpapi": self.serpapi.is_configured(),
+            "skyscrapper": self.rapidapi.is_configured(),
+        }
+        return [name for name in self.flight.provider_order if available.get(name)]
+
+    def has_any_provider(self) -> bool:
+        """Ist mindestens ein Suchdienst nutzbar?"""
+        return bool(self.configured_providers)
 
     def validate(self) -> list[str]:
         """
@@ -164,8 +287,17 @@ class AppConfig:
         """
         errors = []
 
-        if not self.serpapi.is_configured():
-            errors.append("SerpApi API Key nicht konfiguriert (SERPAPI_API_KEY)")
+        if not self.has_any_provider():
+            errors.append(
+                "Kein Suchdienst konfiguriert – setze SERPAPI_API_KEY und/oder RAPIDAPI_KEY"
+            )
+
+        unknown = [
+            name for name in self.flight.provider_order
+            if name not in ("serpapi", "skyscrapper")
+        ]
+        if unknown:
+            errors.append(f"Unbekannte Provider in provider_order: {unknown}")
 
         if not self.telegram.is_configured():
             errors.append("Telegram Bot Token/Chat ID nicht konfiguriert")
@@ -182,9 +314,15 @@ class AppConfig:
         return errors
 
 
-def load_config() -> AppConfig:
-    """Lädt und validiert die App-Konfiguration."""
-    config = AppConfig()
+def load_config(config: AppConfig | None = None) -> AppConfig:
+    """
+    Validiert die App-Konfiguration und protokolliert sie.
+
+    Args:
+        config: Optional eine vorbereitete Konfiguration (z.B. mit gesetzter
+                Ziel-Rotation). Ohne Angabe werden die Defaults genutzt.
+    """
+    config = config or AppConfig()
     errors = config.validate()
 
     if errors:
@@ -193,10 +331,34 @@ def load_config() -> AppConfig:
 
     logger.info("Konfiguration geladen")
     logger.info(f"  Abflughäfen: {config.flight.departure_airports}")
-    logger.info(f"  Zielflughäfen: {config.flight.destination_airports}")
+    logger.info(
+        f"  Ziele diesen Lauf: {config.flight.destination_airports}"
+        + (
+            " (inkl. sekundäre)"
+            if config.flight.include_secondary_destinations
+            else f" – sekundär {config.flight.secondary_destinations} übersprungen"
+        )
+    )
     logger.info(f"  Reisende: {config.flight.adults} Erwachsene + {config.flight.num_children} Kinder")
     logger.info(f"  Flexibilität: ±{config.flight.flexibility_days} Tage")
     logger.info(f"  Max Stopps: {config.flight.max_stops}")
     logger.info(f"  Preislimit: {config.flight.price_limit_alert}€")
+    logger.info("  --- Suchdienste ---")
+    active = config.configured_providers
+    if active:
+        logger.info(f"  Provider-Kette: {' → '.join(active)}")
+    else:
+        logger.warning("  Kein Suchdienst konfiguriert!")
+    for name, ok in (
+        ("SerpApi", config.serpapi.is_configured()),
+        ("Sky Scrapper", config.rapidapi.is_configured()),
+    ):
+        logger.info(f"    {name}: {'konfiguriert' if ok else 'fehlt'}")
+
+    logger.info("  --- API-Budget ---")
+    logger.info(f"  Routen pro Datumspaar: {config.flight.num_routes}")
+    logger.info(f"  Gepäck-Varianten: {config.flight.luggage_variants}")
+    logger.info(f"  Max API-Anfragen/Lauf: {config.flight.max_api_calls_per_run}")
+    logger.info(f"  → Max Datumspaare: {config.flight.max_date_pairs_total}")
 
     return config
